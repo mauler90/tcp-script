@@ -1,0 +1,45 @@
+name: Tag versione S.R.C
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'tcp_v4_6.js'
+
+jobs:
+  tag-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Leggi versione dallo script
+        id: get_version
+        run: |
+          VERSION=$(grep -m1 '@version' tcp_v4_6.js | sed 's/.*@version[[:space:]]*//' | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Versione trovata: $VERSION"
+
+      - name: Crea tag data
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          DATE=$(date +%Y-%m-%d)
+          TAG="v${VERSION}-${DATE}"
+          echo "Creo tag: $TAG"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Elimina il tag se esiste gia (stesso giorno, stesso numero versione)
+          git tag -d "$TAG" 2>/dev/null || true
+          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+
+          # Crea il nuovo tag
+          git tag -a "$TAG" -m "S.R.C v${VERSION} - Deploy del ${DATE}"
+          git push origin "$TAG"
+
+          echo "Tag $TAG creato con successo"
