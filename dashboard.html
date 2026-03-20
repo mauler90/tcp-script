@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S.R.C — Dashboard Riutilizzi</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+
+  :root {
+    --blue:   #002856;
+    --accent: #bdf3fc;
+    --green:  #1a7a1a;
+    --red:    #e74c3c;
+    --light:  #f0f5ff;
+    --border: #d0dff0;
+    --muted:  #667799;
+    --card:   white;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: var(--light);
+    color: var(--blue);
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  header {
+    background: var(--blue);
+    color: white;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 3px solid var(--accent);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  header h1 { font-size: 16px; font-weight: 700; flex: 1; }
+  .meta { font-size: 11px; color: var(--accent); opacity: .8; white-space: nowrap; }
+  .refresh-btn {
+    background: var(--accent);
+    color: var(--blue);
+    border: none;
+    border-radius: 5px;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'IBM Plex Sans', sans-serif;
+    white-space: nowrap;
+  }
+  .refresh-btn:hover { background: #9ae8f8; }
+  .refresh-btn:disabled { opacity: .5; cursor: default; }
+
+  /* ── NOTIFICATION BANNER ── */
+  #notif-banner {
+    display: none;
+    background: var(--red);
+    color: white;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    cursor: pointer;
+    animation: pulse 2s infinite;
+  }
+  #notif-banner:hover { background: #c0392b; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .85; }
+  }
+
+  /* ── SETUP PANEL ── */
+  #setup-panel {
+    max-width: 480px;
+    margin: 40px auto;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px;
+    box-shadow: 0 2px 16px rgba(0,40,86,.08);
+  }
+  #setup-panel h2 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  #setup-panel p { font-size: 12px; color: var(--muted); margin-bottom: 16px; line-height: 1.6; }
+  #setup-panel label { font-size: 12px; font-weight: 600; display: block; margin-bottom: 4px; }
+  #setup-panel input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    margin-bottom: 14px;
+    color: var(--blue);
+  }
+  #setup-panel input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  #setup-btn {
+    width: 100%;
+    background: var(--blue);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+  #setup-btn:hover { background: #003d7a; }
+  #setup-error { color: var(--red); font-size: 12px; margin-top: 8px; display: none; }
+
+  /* ── MAIN CONTENT ── */
+  #main { display: none; padding: 16px 16px 40px; max-width: 900px; margin: 0 auto; }
+
+  /* ── STATS BAR ── */
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .stat-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .stat-num {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--blue);
+    font-family: 'IBM Plex Mono', monospace;
+    display: block;
+  }
+  .stat-label { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+
+  /* ── DATE GROUP ── */
+  .date-group { margin-bottom: 18px; }
+  .date-header {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--blue);
+    padding: 6px 12px;
+    background: var(--accent);
+    border-radius: 5px 5px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .date-header .today-badge {
+    background: var(--red);
+    color: white;
+    border-radius: 3px;
+    padding: 1px 7px;
+    font-size: 10px;
+  }
+  .date-header .count-badge {
+    background: rgba(0,40,86,.15);
+    color: var(--blue);
+    border-radius: 3px;
+    padding: 1px 7px;
+    font-size: 10px;
+    margin-left: auto;
+  }
+
+  /* ── PAIR CARD ── */
+  .pair-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-top: none;
+    padding: 10px 14px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .pair-card:last-child { border-radius: 0 0 5px 5px; }
+  .pair-card + .pair-card { border-top: 1px solid var(--border); }
+
+  .tag {
+    border-radius: 3px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .tag-imp { background: #d0f0ff; color: #005580; }
+  .tag-exp { background: #d4f5d4; color: var(--green); }
+  .tag-carrier { background: var(--light); color: var(--blue); border: 1px solid var(--border); }
+  .tag-cont { background: #f5f0ff; color: #4a1ab8; border: 1px solid #d8c8f8; }
+
+  .addr { font-weight: 600; color: var(--blue); }
+  .port { font-size: 10px; color: var(--muted); }
+  .dlv { font-size: 11px; color: #334; }
+  .sep { color: var(--muted); font-weight: 700; margin: 0 2px; }
+
+  .km-badge {
+    background: var(--green);
+    color: white;
+    border-radius: 3px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-left: auto;
+  }
+
+  /* ── EMPTY STATE ── */
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .empty span { display: block; font-size: 36px; margin-bottom: 12px; }
+
+  /* ── LOADING ── */
+  #loading {
+    display: none;
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 4px solid var(--border);
+    border-top-color: var(--blue);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── FOOTER ── */
+  footer {
+    text-align: center;
+    padding: 20px;
+    font-size: 11px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    margin-top: 20px;
+  }
+
+  /* ── MOBILE ── */
+  @media (max-width: 600px) {
+    .pair-card { flex-direction: column; align-items: flex-start; }
+    .km-badge { margin-left: 0; }
+    header { flex-wrap: wrap; gap: 8px; }
+    .meta { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>S.R.C — Dashboard Riutilizzi</h1>
+  <span class="meta" id="last-update">—</span>
+  <button class="refresh-btn" id="refresh-btn" onclick="loadData()">&#8635; Aggiorna</button>
+</header>
+
+<div id="notif-banner" onclick="loadData()"></div>
+
+<!-- SETUP -->
+<div id="setup-panel">
+  <h2>Configura la dashboard</h2>
+  <p>Inserisci il Gist ID del riutilizzi da visualizzare. Lo trovi nelle impostazioni dello script S.R.C oppure nell'URL del Gist su GitHub.</p>
+  <label>Gist ID</label>
+  <input id="input-gist-id" type="text" placeholder="es. a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4">
+  <button id="setup-btn" onclick="setupGist()">&#10003; Salva e carica</button>
+  <div id="setup-error"></div>
+</div>
+
+<!-- LOADING -->
+<div id="loading">
+  <div class="spinner"></div>
+  <div>Caricamento riutilizzi...</div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <div class="stats-bar" id="stats-bar"></div>
+  <div id="content"></div>
+</div>
+
+<footer>
+  S.R.C — Script Riutilizzo Container per C.r.t. &nbsp;·&nbsp; &copy; 2026 Vittorio Zingoni
+</footer>
+
+<script>
+const STORAGE_GIST_ID  = 'src_dashboard_gist_id';
+const STORAGE_LAST_TS  = 'src_dashboard_last_ts';
+const STORAGE_LAST_EXP = 'src_dashboard_last_exported';
+var _autoTimer = null;
+var _currentPairs = [];
+
+// ── CARRIERS COLOR MAP ──
+var CARRIER_COLORS = {
+  MSC:        '#b3d4f5', Hapag:     '#fdd5a0',
+  ONE:        '#b3f5c8', CMA:       '#d5b3f5',
+  OOCL:       '#ffd5b3', ZIM:       '#b3f5f5',
+  'Yang Ming':'#f5f5b3', Maersk:    '#d5d5f5',
+  Evergreen:  '#b3f5d5'
+};
+
+function carrierColor(c) { return CARRIER_COLORS[c] || '#e8ecf4'; }
+
+function pd(s) {
+  var m = s.match(/(\d{2})\/(\d{2})\/(\d{2})/);
+  if (!m) return null;
+  var d = new Date(2000+parseInt(m[3]), parseInt(m[2])-1, parseInt(m[1]));
+  d.setHours(0,0,0,0); return d;
+}
+
+function formatDate(s) {
+  var d = pd(s); if (!d) return s.substring(0,8);
+  var days = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+  return days[d.getDay()] + ' ' + d.getDate()+'/'+(d.getMonth()+1).toString().padStart(2,'0')+'/'+(d.getFullYear()+'').slice(-2);
+}
+
+function isToday(s) {
+  var d = pd(s); if (!d) return false;
+  var t = new Date(); t.setHours(0,0,0,0);
+  return d.getTime() === t.getTime();
+}
+
+function isFuture(s) {
+  var d = pd(s); if (!d) return false;
+  var t = new Date(); t.setHours(0,0,0,0);
+  return d >= t;
+}
+
+// ── SETUP ──
+function setupGist() {
+  var gid = document.getElementById('input-gist-id').value.trim();
+  var errEl = document.getElementById('setup-error');
+  if (!gid || gid.length < 10) {
+    errEl.textContent = 'Inserisci un Gist ID valido.';
+    errEl.style.display = 'block'; return;
+  }
+  localStorage.setItem(STORAGE_GIST_ID, gid);
+  errEl.style.display = 'none';
+  document.getElementById('setup-panel').style.display = 'none';
+  loadData();
+}
+
+// ── LOAD DATA ──
+function loadData() {
+  var gid = localStorage.getItem(STORAGE_GIST_ID);
+  if (!gid) { document.getElementById('setup-panel').style.display = 'block'; return; }
+
+  var btn = document.getElementById('refresh-btn');
+  btn.disabled = true; btn.textContent = 'Caricamento...';
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('main').style.display = 'none';
+  document.getElementById('notif-banner').style.display = 'none';
+
+  fetch('https://api.github.com/gists/' + gid)
+    .then(function(r) {
+      if (!r.ok) throw new Error('Gist non trovato (HTTP ' + r.status + '). Controlla il Gist ID.');
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data.files || !data.files['tcp_pairs.json']) {
+        throw new Error('File tcp_pairs.json non trovato nel Gist.');
+      }
+      var parsed = JSON.parse(data.files['tcp_pairs.json'].content);
+      if (!parsed.pairs) throw new Error('Formato non valido.');
+
+      var exported = parsed.exported || '';
+      var lastExported = localStorage.getItem(STORAGE_LAST_EXP) || '';
+
+      _currentPairs = parsed.pairs;
+      localStorage.setItem(STORAGE_LAST_TS, Date.now().toString());
+      localStorage.setItem(STORAGE_LAST_EXP, exported);
+
+      render(_currentPairs);
+      document.getElementById('last-update').textContent = 'Aggiornato: ' + new Date().toLocaleTimeString('it-IT');
+      btn.disabled = false; btn.textContent = '\u21bb Aggiorna';
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('main').style.display = 'block';
+
+      // Notifica se dati nuovi rispetto all'ultima visita
+      if (lastExported && exported && exported > lastExported) {
+        showNotifBanner('Nuovi riutilizzi disponibili — clicca per aggiornare');
+      }
+
+      // Auto-refresh ogni 5 minuti
+      clearTimeout(_autoTimer);
+      _autoTimer = setTimeout(checkForUpdates, 5 * 60 * 1000);
+    })
+    .catch(function(err) {
+      btn.disabled = false; btn.textContent = '\u21bb Aggiorna';
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('setup-panel').style.display = 'block';
+      var errEl = document.getElementById('setup-error');
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    });
+}
+
+// ── CHECK SILENZIOSO AGGIORNAMENTI ──
+function checkForUpdates() {
+  var gid = localStorage.getItem(STORAGE_GIST_ID);
+  if (!gid) return;
+  fetch('https://api.github.com/gists/' + gid)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.files || !data.files['tcp_pairs.json']) return;
+      var parsed = JSON.parse(data.files['tcp_pairs.json'].content);
+      var exported = parsed.exported || '';
+      var lastExported = localStorage.getItem(STORAGE_LAST_EXP) || '';
+      if (exported && lastExported && exported > lastExported) {
+        showNotifBanner('Nuovi riutilizzi disponibili — tocca per aggiornare');
+      }
+      // Ricontrolla tra 5 minuti
+      clearTimeout(_autoTimer);
+      _autoTimer = setTimeout(checkForUpdates, 5 * 60 * 1000);
+    })
+    .catch(function() {
+      clearTimeout(_autoTimer);
+      _autoTimer = setTimeout(checkForUpdates, 5 * 60 * 1000);
+    });
+}
+
+function showNotifBanner(msg) {
+  var b = document.getElementById('notif-banner');
+  b.textContent = '\uD83D\uDD14 ' + msg;
+  b.style.display = 'block';
+}
+
+// ── RENDER ──
+function render(pairs) {
+  var today = new Date(); today.setHours(0,0,0,0);
+
+  // Filtra solo riutilizzi futuri (export >= ieri)
+  var ieri = new Date(today); ieri.setDate(today.getDate()-1);
+  var active = pairs.filter(function(p) {
+    var de = pd(p.exp.delivery); return !de || de >= ieri;
+  });
+
+  // Stats
+  var total = active.length;
+  var todayCount = active.filter(function(p) { return isToday(p.imp.delivery); }).length;
+  var withKm = active.filter(function(p) { return p.km > 0; }).length;
+  var carriers = {};
+  active.forEach(function(p) { carriers[p.imp.carrier] = (carriers[p.imp.carrier]||0)+1; });
+  var topCarrier = Object.keys(carriers).sort(function(a,b){return carriers[b]-carriers[a];})[0] || '—';
+
+  document.getElementById('stats-bar').innerHTML =
+    stat(total, 'A programma') +
+    stat(todayCount, 'Oggi') +
+    stat(withKm, 'Con km') +
+    stat(topCarrier, 'Top carrier');
+
+  if (!active.length) {
+    document.getElementById('content').innerHTML =
+      '<div class="empty"><span>📭</span>Nessun riutilizzo a programma.</div>';
+    return;
+  }
+
+  // Raggruppa per data import
+  var groups = {};
+  active.forEach(function(p) {
+    var k = p.imp.delivery.substring(0,8) || '?';
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(p);
+  });
+
+  var html = '';
+  Object.keys(groups)
+    .sort(function(a,b) { return (pd(groups[a][0].imp.delivery)||0) - (pd(groups[b][0].imp.delivery)||0); })
+    .forEach(function(k) {
+      var grp = groups[k];
+      var dl = grp[0].imp.delivery.substring(0,8);
+      var isT = isToday(dl);
+      html += '<div class="date-group">';
+      html += '<div class="date-header">';
+      html += '📅 ' + formatDate(dl);
+      if (isT) html += ' <span class="today-badge">OGGI</span>';
+      html += '<span class="count-badge">' + grp.length + (grp.length===1?' riutilizzo':' riutilizzi') + '</span>';
+      html += '</div>';
+
+      grp.forEach(function(p) {
+        var col = carrierColor(p.imp.carrier);
+        html += '<div class="pair-card" style="border-left:4px solid ' + col + ';">';
+        html += '<span class="tag tag-imp">IMP</span>';
+        html += '<span class="tag tag-carrier">' + p.imp.carrier + '</span>';
+        html += '<span class="tag tag-cont">' + p.imp.cont + '</span>';
+        if (p.imp.contNr) html += '<span class="port">' + p.imp.contNr + '</span>';
+        html += '<span class="addr">' + cityOf(p.imp.address) + '</span>';
+        html += '<span class="port">' + portA(p.imp.port) + '</span>';
+        html += '<span class="sep">↕</span>';
+        if (p.tappa) html += '<span style="color:#1a7a1a;font-size:10px;font-weight:bold;">⚑ ' + p.tappa + '</span><span class="sep">→</span>';
+        html += '<span class="tag tag-exp">EXP</span>';
+        html += '<span class="addr">' + cityOf(p.exp.address) + '</span>';
+        html += '<span class="port">' + portA(p.exp.port) + '</span>';
+        html += '<span class="dlv">' + p.exp.delivery.substring(0,8) + '</span>';
+        if (p.km > 0) html += '<span class="km-badge">' + p.km + ' km</span>';
+        html += '</div>';
+      });
+
+      html += '</div>';
+    });
+
+  document.getElementById('content').innerHTML = html;
+}
+
+function stat(val, label) {
+  return '<div class="stat-card"><span class="stat-num">' + val + '</span><span class="stat-label">' + label + '</span></div>';
+}
+
+function cityOf(addr) {
+  if (!addr) return '';
+  var part = addr.split('+')[0].trim();
+  var paren = part.indexOf('(');
+  if (paren > 0) part = part.substring(0, paren).trim();
+  else part = part.replace(/\d{5}/g,'').trim();
+  return part.split(/[,\-]/)[0].trim();
+}
+
+function portA(p) {
+  if (!p) return '';
+  if (/spezia/i.test(p)) return 'SPZ';
+  if (/livorno/i.test(p)) return 'LIV';
+  if (/genova/i.test(p)) return 'GEN';
+  return p.substring(0,3).toUpperCase();
+}
+
+// ── INIT ──
+window.addEventListener('load', function() {
+  var gid = localStorage.getItem(STORAGE_GIST_ID);
+  if (gid) {
+    document.getElementById('input-gist-id').value = gid;
+    document.getElementById('setup-panel').style.display = 'none';
+    loadData();
+  }
+});
+
+// Ricarica quando la pagina torna in primo piano (utile su mobile)
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible') {
+    var lastTs = parseInt(localStorage.getItem(STORAGE_LAST_TS) || '0');
+    if (Date.now() - lastTs > 5 * 60 * 1000) loadData();
+  }
+});
+</script>
+</body>
+</html>
