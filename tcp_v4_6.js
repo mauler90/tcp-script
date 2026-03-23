@@ -1,14 +1,22 @@
 // ==UserScript==
-// @name         TCP Completo v4.6
+// @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      4.6
-// @description  Layout, filtri, export, contatore, autocompila + Monitor nuovi viaggi
+// @version      1.0
+// @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
 // ==/UserScript==
 
 (function() {
 'use strict';
+
+// =============================================================================
+//  S.R.C - Script Riutilizzo Container per C.r.t.
+//  (c) 2026 Vittorio Zingoni - All rights reserved
+//  Uso interno autorizzato. Vietata la riproduzione o distribuzione
+//  senza esplicito consenso scritto dell'autore.
+// =============================================================================
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  BASE: Layout, filtri, export, contatore, autocompila
@@ -171,6 +179,43 @@ function collectCounterData() {
     return result;
 }
 
+// -- DRAG HELPER --
+function tcpMakeDraggable(el, storageKey) {
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(storageKey)); } catch(e) {}
+    if (saved && saved.left !== undefined) {
+        el.style.left = saved.left; el.style.top = saved.top;
+        el.style.right = 'auto'; el.style.bottom = 'auto';
+    }
+    var isDragging = false, startX, startY, startLeft, startTop;
+    el.addEventListener('mousedown', function(e) {
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'LABEL') return;
+        isDragging = true;
+        var rect = el.getBoundingClientRect();
+        startX = e.clientX; startY = e.clientY;
+        startLeft = rect.left; startTop = rect.top;
+        el.style.left = startLeft + 'px'; el.style.top = startTop + 'px';
+        el.style.right = 'auto'; el.style.bottom = 'auto';
+        el.style.cursor = 'grabbing';
+        e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+        var nx = startLeft + (e.clientX - startX);
+        var ny = startTop + (e.clientY - startY);
+        nx = Math.max(0, Math.min(nx, window.innerWidth - el.offsetWidth));
+        ny = Math.max(0, Math.min(ny, window.innerHeight - el.offsetHeight));
+        el.style.left = nx + 'px'; el.style.top = ny + 'px';
+    });
+    document.addEventListener('mouseup', function() {
+        if (!isDragging) return;
+        isDragging = false;
+        el.style.cursor = 'move';
+        localStorage.setItem(storageKey, JSON.stringify({left: el.style.left, top: el.style.top}));
+    });
+    el.style.cursor = 'move';
+}
+
 let _wTitle = null, _wSummary = null, _wDetail = null, _wBtn = null, _wEl = null;
 
 function buildCounterWidget() {
@@ -198,6 +243,7 @@ function buildCounterWidget() {
     box.appendChild(_wDetail);
     _wEl = box;
     document.body.appendChild(box);
+    tcpMakeDraggable(box, 'tcp_widget_counter_pos');
 }
 
 function updateCounterWidget(data) {
@@ -814,40 +860,40 @@ function buildSidePanel() {
     // Contenitore principale
     var panel = document.createElement('div');
     panel.id = 'tcp-side-panel';
-    panel.style.cssText = 'position:fixed;left:0;top:calc(50% - 74px);transform:translateY(-50%);z-index:9998;display:flex;flex-direction:row;align-items:stretch;font-family:Arial,sans-serif;';
+    panel.style.cssText = 'position:fixed;right:0;top:calc(50% - 74px);transform:translateY(-50%);z-index:9998;display:flex;flex-direction:row;align-items:stretch;font-family:Arial,sans-serif;';
 
     // Pannello contenuto (collassabile)
     var body = document.createElement('div');
     body.id = 'tcp-side-body';
-    body.style.cssText = 'background:white;border:2px solid #002856;border-left:none;border-right:none;border-radius:0;padding:10px 8px;width:160px;box-shadow:none;overflow-y:auto;max-height:80vh;transition:width .2s,padding .2s,opacity .2s;overflow:hidden;';
+    body.style.cssText = 'background:white;border:2px solid #002856;border-right:none;border-left:none;border-radius:0;padding:10px 8px;width:160px;box-shadow:none;overflow-y:auto;max-height:80vh;transition:width .2s,padding .2s,opacity .2s;overflow:hidden;';
 
     // Linguetta toggle — fratello flex del body, sempre visibile
     var tab = document.createElement('div');
     tab.id = 'tcp-side-tab';
     tab.title = 'Apri/Chiudi filtri';
-    tab.style.cssText = 'background:#002856;color:white;border:2px solid #002856;border-left:none;border-radius:0 8px 8px 0;width:22px;min-width:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;writing-mode:vertical-rl;text-orientation:mixed;user-select:none;font-size:11px;font-weight:bold;letter-spacing:1px;box-shadow:3px 0 8px rgba(0,0,0,.2);flex-shrink:0;';
-    tab.textContent = '◀ FILTRI';
+    tab.style.cssText = 'background:#002856;color:white;border:2px solid #002856;border-right:none;border-radius:8px 0 0 8px;width:22px;min-width:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;writing-mode:vertical-rl;text-orientation:mixed;user-select:none;font-size:11px;font-weight:bold;letter-spacing:1px;box-shadow:-3px 0 8px rgba(0,0,0,.2);flex-shrink:0;';
+    tab.textContent = '▶ FILTRI';
 
     var open = false;
     // Stato iniziale: chiuso
     body.style.width = '0';
     body.style.padding = '0';
     body.style.opacity = '0';
-    tab.textContent = '▶ FILTRI';
+    tab.textContent = '◀ FILTRI';
     function togglePanel() {
         open = !open;
         if (open) {
             body.style.width = '160px';
             body.style.padding = '10px 8px';
             body.style.opacity = '1';
-            body.style.borderLeft = '2px solid #002856';
-            tab.textContent = '◀ FILTRI';
+            body.style.borderRight = '2px solid #002856';
+            tab.textContent = '▶ FILTRI';
         } else {
             body.style.width = '0';
             body.style.padding = '0';
             body.style.opacity = '0';
-            body.style.borderLeft = 'none';
-            tab.textContent = '▶ FILTRI';
+            body.style.borderRight = 'none';
+            tab.textContent = '◀ FILTRI';
         }
     }
     tab.addEventListener('click', togglePanel);
@@ -931,8 +977,8 @@ function buildSidePanel() {
         btn('📥 Esporta', '#1a5c1a', function(){ tcpEsportaTrattteGest(); })
     ));
 
-    panel.appendChild(body);
     panel.appendChild(tab);
+    panel.appendChild(body);
     document.body.appendChild(panel);
 }
 
@@ -2382,10 +2428,14 @@ function importPair(txt){
     _pushUndo();
     if(!txt||!txt.trim()){alert('Incolla prima il testo del riutilizzo.');return;}
     try{
-        var lines=txt.trim().split('\\n');
-        if(lines.length<3){alert('Formato non valido: servono 3 righe.');return;}
-        var ip=lines[0].split(' | ');
-        var ep=lines[2].split(' | ');
+        var lines=txt.trim().split('\\n').map(function(l){return l.trim();}).filter(function(l){return l.length>0;});
+        if(lines.length<2){alert('Formato non valido: servono almeno 2 righe.');return;}
+        var impLine=lines.find(function(l){return l.indexOf('IMPORT')>=0&&l.indexOf(' | ')>=0;});
+        var expLine=lines.find(function(l){return l.indexOf('EXPORT')>=0&&l.indexOf(' | ')>=0;});
+        if(!impLine){alert('Riga IMPORT non trovata nel testo incollato.');return;}
+        if(!expLine){alert('Riga EXPORT non trovata nel testo incollato.');return;}
+        var ip=impLine.split(' | ');
+        var ep=expLine.split(' | ');
         if(ip.length<8){alert('Riga IMPORT non completa ('+ip.length+' campi trovati).');return;}
         if(ep.length<8){alert('Riga EXPORT non completa ('+ep.length+' campi trovati).');return;}
         var lef=function(s){var m=(s||'').match(/LEF:\\s*(.*)/i);return m&&m[1].trim()!=='\\u2014'?m[1].trim():'';};
@@ -2468,16 +2518,19 @@ function importPair(txt){
         });
         rPairs();rPlanner();
         document.getElementById('import-pair-txt').value='';
-        alert('Riutilizzo importato!');
+        tcpToast('\u2713 Riutilizzo importato!');
     }catch(e){alert('Errore nel parsing: '+e.message);}
 }
 function removePair(txt){
     if(!txt||!txt.trim()){alert('Incolla il testo del riutilizzo da rimuovere.');return;}
     try{
-        var lines=txt.trim().split('\\n');
-        if(lines.length<3){alert('Formato non valido: servono 3 righe.');return;}
-        var ip=lines[0].split(' | ');
-        var ep=lines[2].split(' | ');
+        var lines=txt.trim().split('\\n').map(function(l){return l.trim();}).filter(function(l){return l.length>0;});
+        if(lines.length<2){alert('Formato non valido: servono almeno 2 righe.');return;}
+        var impLine=lines.find(function(l){return l.indexOf('IMPORT')>=0&&l.indexOf(' | ')>=0;});
+        var expLine=lines.find(function(l){return l.indexOf('EXPORT')>=0&&l.indexOf(' | ')>=0;});
+        if(!impLine||!expLine){alert('Formato non riconosciuto.');return;}
+        var ip=impLine.split(' | ');
+        var ep=expLine.split(' | ');
         if(ip.length<6||ep.length<5){alert('Formato non riconosciuto.');return;}
         var pairs=lp();
         var idx=pairs.findIndex(function(p){
@@ -2488,7 +2541,7 @@ function removePair(txt){
         if(!confirm('Rimuovere il riutilizzo?')){return;}
         _pushUndo();rmPair(idx);
         document.getElementById('import-pair-txt').value='';
-        alert('Riutilizzo rimosso.');
+        tcpToast('\u2713 Riutilizzo rimosso.');
     }catch(e){alert('Errore: '+e.message);}
 }
 // ── UNDO STACK (sessionStorage, max 5 snapshot) ──
@@ -2610,6 +2663,346 @@ function rmPair(i){
     }
     pairs.splice(i,1);sp(pairs);rPairs();rPlanner();
 }
+// -- GIST SETTINGS --
+function tcpGistSettings(){
+    var tok=localStorage.getItem('tcp_gist_token')||'';
+    var gid=localStorage.getItem('tcp_gist_id')||'';
+    var gidc=localStorage.getItem('tcp_gist_id_collega')||'';
+    var m=document.getElementById('gist-settings-modal');if(!m)return;
+    document.getElementById('gist-token-input').value=tok;
+    document.getElementById('gist-id-input').value=gid;
+    document.getElementById('gist-id-collega-input').value=gidc;
+    m.style.display='flex';
+}
+function tcpSaveGistSettings(){
+    var tok=(document.getElementById('gist-token-input').value||'').trim();
+    var gid=(document.getElementById('gist-id-input').value||'').trim();
+    var gidc=(document.getElementById('gist-id-collega-input').value||'').trim();
+    localStorage.setItem('tcp_gist_token',tok);
+    localStorage.setItem('tcp_gist_id',gid);
+    localStorage.setItem('tcp_gist_id_collega',gidc);
+    document.getElementById('gist-settings-modal').style.display='none';
+    var n=document.getElementById('gist-save-note');
+    if(n){n.textContent='Salvato';setTimeout(function(){n.textContent='';},2000);}
+}
+function tcpCloseGistSettings(){
+    document.getElementById('gist-settings-modal').style.display='none';
+}
+// -- EXPORT RIUTILIZZI FILE --
+function tcpExportPairs(){
+    var pairs=lp();
+    if(!pairs.length){alert('Nessun riutilizzo da esportare.');return;}
+    var data=JSON.stringify({version:1,exported:new Date().toISOString(),pairs:pairs},null,2);
+    var blob=new Blob([data],{type:'application/json'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='riutilizzi_'+new Date().toISOString().slice(0,10)+'.tcp';
+    a.click();URL.revokeObjectURL(a.href);
+}
+// -- MERGE LOGIC --
+function tcpDoMerge(incoming){
+    var existing=lp();
+    var toAdd=[];var conflicts=[];var ignored=0;
+    var t=function(s){return(s||'').trim();};
+    incoming.forEach(function(inc){
+        var iNr=t(inc.imp&&inc.imp.contNr);
+        var eNr=t(inc.exp&&inc.exp.contNr);
+        var found=null;var foundType=null;
+        for(var i=0;i<existing.length;i++){
+            var ex=existing[i];
+            var exINr=t(ex.imp&&ex.imp.contNr);
+            var exENr=t(ex.exp&&ex.exp.contNr);
+            if(iNr&&eNr&&exINr&&exENr){
+                if(iNr===exINr&&eNr===exENr){found=ex;foundType='exact';break;}
+                if(iNr===exINr&&eNr!==exENr){found=ex;foundType='conflict-exp';break;}
+                if(eNr===exENr&&iNr!==exINr){found=ex;foundType='conflict-imp';break;}
+            }
+            if(iNr&&exINr&&iNr===exINr&&(!eNr||!exENr)){found=ex;foundType='exact';break;}
+            if(eNr&&exENr&&eNr===exENr&&(!iNr||!exINr)){found=ex;foundType='exact';break;}
+        }
+        if(!found&&!iNr&&!eNr){
+            for(var j=0;j<existing.length;j++){
+                var ex2=existing[j];
+                if(t(ex2.imp.carrier)===t(inc.imp.carrier)&&t(ex2.imp.address)===t(inc.imp.address)&&t(ex2.imp.delivery)===t(inc.imp.delivery)){
+                    found=ex2;foundType='exact';break;
+                }
+            }
+        }
+        if(!found){toAdd.push(inc);}
+        else if(foundType==='exact'){ignored++;}
+        else{conflicts.push({inc:inc,ex:found,type:foundType});}
+    });
+    return{toAdd:toAdd,conflicts:conflicts,ignored:ignored};
+}
+function tcpApplyMergePairs(toAdd,conflictResolutions){
+    _pushUndo();
+    var pairs=lp();
+    toAdd.forEach(function(p){pairs.push(p);});
+    conflictResolutions.forEach(function(res){
+        if(res.choice==='theirs'){
+            var idx=pairs.findIndex(function(p){return p===res.ex;});
+            if(idx>=0)pairs[idx]=res.inc;
+        }
+    });
+    sp(pairs);rPairs();rPlanner();
+}
+// -- IMPORT RIUTILIZZI DA FILE --
+var _mergePayload=null;
+function tcpImportPairsFile(input){
+    var file=input.files&&input.files[0];input.value='';
+    if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(e){
+        try{
+            var data=JSON.parse(e.target.result);
+            if(!data.pairs||!Array.isArray(data.pairs)){alert('File non valido: manca array pairs.');return;}
+            var result=tcpDoMerge(data.pairs);
+            _mergePayload={toAdd:result.toAdd,conflicts:result.conflicts,source:'file'};
+            tcpShowMergePairsModal(result);
+        }catch(err){alert('Errore lettura file: '+err.message);}
+    };
+    reader.readAsText(file,'UTF-8');
+}
+// -- PUBLISH SU GIST --
+function tcpPublishGist(){
+    var tok=localStorage.getItem('tcp_gist_token')||'';
+    if(!tok){alert('Imposta prima il token GitHub nelle impostazioni Gist.');tcpGistSettings();return;}
+    var gid=localStorage.getItem('tcp_gist_id')||'';
+    var ts=new Date().toISOString();
+    var pairs=lp();
+    var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
+    var alias=[];try{alias=JSON.parse(localStorage.getItem('tcp_tratte_alias')||'[]');}catch(e){}
+    var tar=[];try{tar=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
+    var files={
+        'tcp_pairs.json':{content:JSON.stringify({version:1,exported:ts,pairs:pairs},null,2)},
+        'tcp_tratte.json':{content:JSON.stringify({version:1,exported:ts,tratte:tratte},null,2)},
+        'tcp_alias.json':{content:JSON.stringify({version:1,exported:ts,alias:alias},null,2)},
+        'tcp_tariffario.json':{content:JSON.stringify({version:1,exported:ts,tariffario:tar},null,2)}
+    };
+    var body=JSON.stringify({description:'S.R.C sync',public:false,files:files});
+    var url=gid?'https://api.github.com/gists/'+gid:'https://api.github.com/gists';
+    var method=gid?'PATCH':'POST';
+    var btn=document.getElementById('btn-gist-publish');
+    if(btn){btn.textContent='Pubblicazione...';btn.disabled=true;}
+    fetch(url,{method:method,headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},body:body})
+        .then(function(r){return r.json();})
+        .then(function(data){
+            if(data.id){
+                localStorage.setItem('tcp_gist_id',data.id);
+                if(btn){btn.textContent='\u2601\uFE0F Pubblica';btn.disabled=false;}
+                tcpToast('\u2601\uFE0F Pubblicato'+(gid?'':' - ID: '+data.id+' (salvato)'));
+            }else{
+                if(btn){btn.textContent='\u2601\uFE0F Pubblica';btn.disabled=false;}
+                alert('Errore: '+(data.message||JSON.stringify(data)));
+            }
+        })
+        .catch(function(err){
+            if(btn){btn.textContent='\u2601\uFE0F Pubblica';btn.disabled=false;}
+            alert('Errore di rete: '+err.message);
+        });
+}
+// -- MERGE HELPERS --
+function tcpDoMergeTratte(incoming){
+    var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
+    var toAdd=[];var conflicts=[];var ignored=0;
+    incoming.forEach(function(t){
+        var ex=existing.find(function(x){return x.id===t.id;});
+        if(!ex){toAdd.push(t);}
+        else if(ex.km!==t.km){conflicts.push({ex:ex,inc:t});}
+        else{ignored++;}
+    });
+    return{toAdd:toAdd,conflicts:conflicts,ignored:ignored};
+}
+function tcpDoMergeAlias(incoming){
+    var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tratte_alias')||'[]');}catch(e){}
+    var added=0;
+    incoming.forEach(function(a){
+        var ex=existing.find(function(x){return x.nome.toLowerCase()===a.nome.toLowerCase();});
+        if(!ex){existing.push(a);added++;}
+        else{a.indirizzi.forEach(function(ind){if(ex.indirizzi.indexOf(ind)<0){ex.indirizzi.push(ind);added++;}});}
+    });
+    if(added>0)localStorage.setItem('tcp_tratte_alias',JSON.stringify(existing));
+    return{added:added};
+}
+function tcpDoMergeTariffario(incoming){
+    var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
+    var toAdd=[];var conflicts=[];var ignored=0;
+    incoming.forEach(function(t){
+        var ex=existing.find(function(x){return x.km===t.km;});
+        if(!ex){toAdd.push(t);}
+        else if(ex.c20!==t.c20||ex.c40!==t.c40){conflicts.push({ex:ex,inc:t});}
+        else{ignored++;}
+    });
+    return{toAdd:toAdd,conflicts:conflicts,ignored:ignored};
+}
+// -- SYNC DA GIST --
+function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
+    var btn=document.getElementById(btnId);
+    fetch('https://api.github.com/gists/'+gidc,{headers:{'Authorization':'Bearer '+tok}})
+        .then(function(r){return r.json();})
+        .then(function(data){
+            if(btn){btn.textContent=btn.dataset.label;btn.disabled=false;}
+            if(!data.files){alert('Gist collega non trovato o vuoto.');return;}
+            var pairsResult={toAdd:[],conflicts:[],ignored:0};
+            if(data.files['tcp_pairs.json']){
+                var pp=JSON.parse(data.files['tcp_pairs.json'].content);
+                if(pp.pairs)pairsResult=tcpDoMerge(pp.pairs);
+            }
+            var tratteResult={toAdd:[],conflicts:[],ignored:0};
+            if(data.files['tcp_tratte.json']){
+                var tt=JSON.parse(data.files['tcp_tratte.json'].content);
+                if(tt.tratte)tratteResult=tcpDoMergeTratte(tt.tratte);
+            }
+            if(data.files['tcp_alias.json']){
+                var aa=JSON.parse(data.files['tcp_alias.json'].content);
+                if(aa.alias)tcpDoMergeAlias(aa.alias);
+            }
+            var tarResult={toAdd:[],conflicts:[],ignored:0};
+            if(data.files['tcp_tariffario.json']){
+                var tr=JSON.parse(data.files['tcp_tariffario.json'].content);
+                if(tr.tariffario)tarResult=tcpDoMergeTariffario(tr.tariffario);
+            }
+            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:tarResult,source:'gist',autoPublish:autoPublish};
+            tcpSetPairsBadge(0);
+            tcpShowSyncModal(_mergePayload);
+        })
+        .catch(function(err){
+            if(btn){btn.textContent=btn.dataset.label;btn.disabled=false;}
+            alert('Errore: '+err.message);
+        });
+}
+function tcpSyncGist(){
+    var tok=localStorage.getItem('tcp_gist_token')||'';
+    var gidc=localStorage.getItem('tcp_gist_id_collega')||'';
+    if(!tok){alert('Imposta prima il token GitHub nelle impostazioni.');tcpGistSettings();return;}
+    if(!gidc){alert('Imposta il Gist ID del collega nelle impostazioni.');tcpGistSettings();return;}
+    var btn=document.getElementById('btn-gist-sync');
+    if(btn){btn.textContent='Scaricamento...';btn.disabled=true;}
+    tcpFetchCollegaGist(tok,gidc,false,'btn-gist-sync');
+}
+function tcpSyncAndPublish(){
+    var tok=localStorage.getItem('tcp_gist_token')||'';
+    var gidc=localStorage.getItem('tcp_gist_id_collega')||'';
+    if(!tok){alert('Imposta prima il token GitHub nelle impostazioni.');tcpGistSettings();return;}
+    if(!gidc){alert('Imposta il Gist ID del collega nelle impostazioni.');tcpGistSettings();return;}
+    var btn=document.getElementById('btn-gist-syncpub');
+    if(btn){btn.textContent='Sincronizzazione...';btn.disabled=true;}
+    tcpFetchCollegaGist(tok,gidc,true,'btn-gist-syncpub');
+}
+// -- MODAL MERGE RIUTILIZZI --
+function tcpShowMergePairsModal(result){tcpShowSyncModal({pairs:result,tratte:{toAdd:[],conflicts:[],ignored:0},tariffario:{toAdd:[],conflicts:[],ignored:0}});}
+function tcpShowSyncModal(payload){
+    var m=document.getElementById('merge-pairs-modal');if(!m)return;
+    var sumEl=document.getElementById('mpm-summary');
+    var confEl=document.getElementById('mpm-conflicts');
+    var sum='';
+    if(result.toAdd.length)sum+=result.toAdd.length+' nuovi da aggiungere. ';
+    if(result.ignored)sum+=result.ignored+' gia presenti ignorati. ';
+    if(result.conflicts.length)sum+=result.conflicts.length+' conflitti da risolvere.';
+    if(!result.toAdd.length&&!result.conflicts.length)sum='Nessuna differenza, tutto gia aggiornato.';
+    var pD=payload.pairs||payload;
+    var tD=payload.tratte||{toAdd:[],conflicts:[],ignored:0};
+    var rD=payload.tariffario||{toAdd:[],conflicts:[],ignored:0};
+    var totNew=(pD.toAdd||[]).length+(tD.toAdd||[]).length+(rD.toAdd||[]).length;
+    var totConf=(pD.conflicts||[]).length+(tD.conflicts||[]).length+(rD.conflicts||[]).length;
+    var totIgn=(pD.ignored||0)+(tD.ignored||0)+(rD.ignored||0);
+    var sum='';
+    if(totNew)sum+=totNew+' nuovi da aggiungere. ';
+    if(totIgn)sum+=totIgn+' gia presenti ignorati. ';
+    if(totConf)sum+=totConf+' conflitti da risolvere.';
+    if(!totNew&&!totConf)sum='Nessuna differenza, tutto gia aggiornato.';
+    if(sumEl)sumEl.textContent=sum;
+    if(confEl){
+        var html='';
+        if((pD.conflicts||[]).length){
+            html+='<div style="font-weight:bold;color:#002856;font-size:12px;margin:8px 0 4px;">Riutilizzi</div>';
+            html+=(pD.conflicts||[]).map(function(cf,ci){
+                var _f=cf.type==='conflict-exp'?'Nr.EXP diverso':'Nr.IMP diverso';
+                return '<div style="border:1px solid #d0dff0;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;">'
+                    +'<div style="font-weight:bold;color:#002856;margin-bottom:4px;">'+_f+'</div>'
+                    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">'
+                    +'<div style="background:#f0f4fa;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">MIO</div>'
+                    +'<div>'+cf.ex.imp.carrier+' '+cf.ex.imp.cont+'</div><div>'+cf.ex.imp.address+'</div></div>'
+                    +'<div style="background:#f0f8f0;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">COLLEGA</div>'
+                    +'<div>'+cf.inc.imp.carrier+' '+cf.inc.imp.cont+'</div><div>'+cf.inc.imp.address+'</div></div></div>'
+                    +'<div style="display:flex;gap:6px;">'
+                    +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #1a65b8;font-size:11px;"><input type="radio" name="mpc'+ci+'" value="mine" checked> <span style="color:#1a65b8;font-weight:bold;">Il mio</span></label>'
+                    +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #27ae60;font-size:11px;"><input type="radio" name="mpc'+ci+'" value="theirs"> <span style="color:#27ae60;font-weight:bold;">Collega</span></label>'
+                    +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #aaa;font-size:11px;"><input type="radio" name="mpc'+ci+'" value="skip"> <span style="color:#888;">Salta</span></label>'
+                    +'</div></div>';
+            }).join('');
+        }
+        if((tD.conflicts||[]).length){
+            html+='<div style="font-weight:bold;color:#002856;font-size:12px;margin:8px 0 4px;">Tratte</div>';
+            html+=(tD.conflicts||[]).map(function(cf,ci){
+                return '<div style="border:1px solid #d0dff0;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;">'
+                    +'<b>'+cf.ex.scarico+' - '+cf.ex.carico+'</b>'
+                    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0;">'
+                    +'<div style="background:#f0f4fa;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">MIO</div><div>'+cf.ex.km+' km</div></div>'
+                    +'<div style="background:#f0f8f0;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">COLLEGA</div><div>'+cf.inc.km+' km</div></div></div>'
+                    +'<div style="display:flex;gap:6px;">'
+                    +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #1a65b8;font-size:11px;"><input type="radio" name="mtc'+ci+'" value="mine" checked> <span style="color:#1a65b8;font-weight:bold;">Il mio</span></label>'
+                    +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #27ae60;font-size:11px;"><input type="radio" name="mtc'+ci+'" value="theirs"> <span style="color:#27ae60;font-weight:bold;">Collega</span></label>'
+                    +'</div></div>';
+            }).join('');
+        }
+        if((rD.conflicts||[]).length){
+            html+='<div style="font-weight:bold;color:#002856;font-size:12px;margin:8px 0 4px;">Tariffario</div>';
+            html+=(rD.conflicts||[]).map(function(cf,ci){
+                return '<div style="border:1px solid #d0dff0;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;">'
+                    +'<b>'+cf.ex.km+' km</b>'
+                    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0;">'
+                    +'<div style="background:#f0f4fa;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">MIO</div><div>20: '+(cf.ex.c20||'-')+' 40: '+(cf.ex.c40||'-')+'</div></div>'
+                    +'<div style="background:#f0f8f0;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">COLLEGA</div><div>20: '+(cf.inc.c20||'-')+' 40: '+(cf.inc.c40||'-')+'</div></div></div>'
+                    +'<div style="display:flex;gap:6px;">'
+                    +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #1a65b8;font-size:11px;"><input type="radio" name="mtr'+ci+'" value="mine" checked> <span style="color:#1a65b8;font-weight:bold;">Il mio</span></label>'
+                    +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #27ae60;font-size:11px;"><input type="radio" name="mtr'+ci+'" value="theirs"> <span style="color:#27ae60;font-weight:bold;">Collega</span></label>'
+                    +'</div></div>';
+            }).join('');
+        }
+        if(!html)html='<p style="color:#27ae60;font-size:12px;">Nessun conflitto.</p>';
+        confEl.innerHTML=html;
+    }
+    m.style.display='flex';
+}
+function tcpApplyMergePairsModal(){
+    if(!_mergePayload)return;
+    var autoPublish=_mergePayload.autoPublish||false;
+    var pD=_mergePayload.pairs||_mergePayload;
+    var tD=_mergePayload.tratte||{toAdd:[],conflicts:[]};
+    var rD=_mergePayload.tariffario||{toAdd:[],conflicts:[]};
+    // Pairs
+    var pRes=(pD.conflicts||[]).map(function(cf,ci){
+        var sel=document.querySelector('input[name="mpc'+ci+'"]:checked');
+        return{ex:cf.ex,inc:cf.inc,choice:sel?sel.value:'mine'};
+    });
+    tcpApplyMergePairs(pD.toAdd||[],pRes);
+    // Tratte
+    var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
+    (tD.toAdd||[]).forEach(function(t){tratte.push(t);});
+    (tD.conflicts||[]).forEach(function(cf,ci){
+        var sel=document.querySelector('input[name="mtc'+ci+'"]:checked');
+        if(sel&&sel.value==='theirs'){var ex=tratte.find(function(x){return x.id===cf.ex.id;});if(ex)ex.km=cf.inc.km;}
+    });
+    localStorage.setItem('tcp_tratte',JSON.stringify(tratte));
+    if(window.tcpRenderTratte)tcpRenderTratte();
+    // Tariffario
+    var tar=[];try{tar=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
+    (rD.toAdd||[]).forEach(function(t){tar.push(t);});
+    (rD.conflicts||[]).forEach(function(cf,ci){
+        var sel=document.querySelector('input[name="mtr'+ci+'"]:checked');
+        if(sel&&sel.value==='theirs'){var ex=tar.find(function(x){return x.km===cf.ex.km;});if(ex){ex.c20=cf.inc.c20;ex.c40=cf.inc.c40;}}
+    });
+    localStorage.setItem('tcp_tariffario',JSON.stringify(tar));
+    document.getElementById('merge-pairs-modal').style.display='none';
+    _mergePayload=null;
+    if(autoPublish){setTimeout(function(){tcpPublishGist();},400);}
+}
+function tcpCloseMergePairsModal(){
+    document.getElementById('merge-pairs-modal').style.display='none';
+    _mergePayload=null;
+}
+
 function cleanExpired(){
     const today=new Date();today.setHours(0,0,0,0);
     const monStart=monday(0);
@@ -2909,14 +3302,8 @@ function tcpOpenKm(i){
     _kmIdx=i;
     var p=lp()[i];if(!p)return;
     var km=p.km||0;
-    var tipo=p.imp.cont==="20'"?'c20':'c40';
-    var tar=[];try{tar=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
-    var r=tar.find(function(x){return x.km===km;})||{};
-    var grezzo=p.costoGrezzo||(r[tipo]||0);
     var ki=document.getElementById('tcp-km-modal-km');
-    var ci=document.getElementById('tcp-km-modal-costo');
     if(ki)ki.value=km||'';
-    if(ci)ci.value=grezzo||'';
     var m=document.getElementById('tcp-km-modal');
     if(m)m.style.display='flex';
     setTimeout(function(){if(ki)ki.focus();},50);
@@ -2924,24 +3311,10 @@ function tcpOpenKm(i){
 function tcpSaveKm(i){
     if(i===undefined||i===null)i=_kmIdx;
     var ki=document.getElementById('tcp-km-modal-km');
-    var ci=document.getElementById('tcp-km-modal-costo');
     if(!ki)return;
     var km=parseInt(ki.value)||0;
-    var grezzo=parseFloat(ci?ci.value:0)||0;
     var pairs=lp();var p=pairs[i];if(!p)return;
-    p.km=km;p.costoGrezzo=grezzo;sp(pairs);
-    if(km>0&&grezzo>0){
-        var tar=[];try{tar=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
-        var tipo=p.imp.cont==="20'"?'c20':'c40';
-        var r=tar.find(function(x){return x.km===km;});
-        if(r)r[tipo]=grezzo;else{var nr={km:km};nr[tipo]=grezzo;tar.push(nr);}
-        localStorage.setItem('tcp_tariffario',JSON.stringify(tar));
-        var fuel=parseFloat(localStorage.getItem('tcp_fuel')||'0');
-        var cell=document.getElementById('tf-'+km+'-'+tipo);
-        if(cell)cell.textContent='€ '+Math.round(grezzo*(1+fuel/100));
-        var inp=document.querySelector("input[data-km='"+km+"'][data-tipo='"+tipo+"']");
-        if(inp)inp.value=grezzo;
-    }
+    p.km=km;sp(pairs);
     if(km>0){
         var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
         var tid=[p.imp.port,p.imp.address,p.tappa||'',p.exp.address,p.exp.port].join('||');
@@ -3199,7 +3572,79 @@ function tcpPairTitle(dl,count){
     var badge=isToday?' <span style="background:#f0a500;color:white;border-radius:3px;padding:1px 7px;font-size:10px;font-weight:bold;vertical-align:middle;">OGGI</span>':'';
     return '📅 Riutilizzi del '+dl+' &nbsp;·&nbsp; <span style="color:#555;font-weight:normal;font-size:12px;">'+count+(count===1?' abbinamento':' abbinamenti')+'</span>'+badge;
 }
-document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlanner();tcpRenderAlias();SC='created';SA=true;sortBy('created');setTimeout(updCounter,300);setTimeout(updCounter,800);});
+// -- CONTROLLO SILENZIOSO GIST COLLEGA --
+function tcpSetPairsBadge(n){
+    // Badge sul tab
+    var btn=document.querySelector('.tb[data-t="pairs"]');
+    if(btn){
+        var existing=btn.querySelector('.tcp-new-badge');
+        if(n>0){
+            if(!existing){
+                var badge=document.createElement('span');
+                badge.className='tcp-new-badge';
+                badge.style.cssText='background:#e74c3c;color:white;border-radius:10px;padding:1px 6px;font-size:9px;font-weight:bold;margin-left:5px;vertical-align:middle;';
+                badge.textContent='+'+n;
+                btn.appendChild(badge);
+            }else{
+                existing.textContent='+'+n;
+            }
+        }else{
+            if(existing)existing.remove();
+        }
+    }
+    // Widget floating colleghi - costruito con createElement per evitare problemi escaping
+    var w=document.getElementById('tcp-colleghi-widget');
+    if(n>0){
+        if(!w){
+            w=document.createElement('div');
+            w.id='tcp-colleghi-widget';
+            w.style.cssText='position:fixed;bottom:10px;right:240px;background:#e74c3c;color:white;border-radius:6px;padding:8px 14px;font-family:Arial,sans-serif;font-size:12px;font-weight:bold;z-index:9999;box-shadow:0 3px 10px rgba(0,0,0,.3);cursor:pointer;display:flex;align-items:center;gap:8px;';
+            var ico=document.createElement('span');ico.textContent='\uD83D\uDD14';ico.style.fontSize='16px';
+            var msg=document.createElement('span');msg.id='tcp-colleghi-msg';
+            var btnSync=document.createElement('button');
+            btnSync.textContent='Sync';
+            btnSync.style.cssText='margin-left:8px;background:white;color:#e74c3c;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;font-weight:bold;';
+            btnSync.addEventListener('click',function(e){e.stopPropagation();showTab('pairs');tcpSyncAndPublish();});
+            var btnClose=document.createElement('button');
+            btnClose.textContent='x';
+            btnClose.style.cssText='margin-left:4px;background:rgba(255,255,255,.25);color:white;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px;';
+            btnClose.addEventListener('click',function(e){e.stopPropagation();w.remove();});
+            w.appendChild(ico);w.appendChild(msg);w.appendChild(btnSync);w.appendChild(btnClose);
+            document.body.appendChild(w);
+        }
+        var msgEl=document.getElementById('tcp-colleghi-msg');
+        if(msgEl)msgEl.textContent='Collega: +'+n+' riutil'+(n===1?'izzo':'izzi');
+    }else{
+        if(w)w.remove();
+    }
+}
+function tcpCheckCollegaSilent(){
+    var tok=localStorage.getItem('tcp_gist_token')||'';
+    var gidc=localStorage.getItem('tcp_gist_id_collega')||'';
+    if(!tok||!gidc)return;
+    fetch('https://api.github.com/gists/'+gidc,{headers:{'Authorization':'Bearer '+tok}})
+        .then(function(r){return r.json();})
+        .then(function(data){
+            if(!data.files||!data.files['tcp_pairs.json'])return;
+            var parsed=JSON.parse(data.files['tcp_pairs.json'].content);
+            if(!parsed.pairs||!Array.isArray(parsed.pairs))return;
+            var result=tcpDoMerge(parsed.pairs);
+            tcpSetPairsBadge(result.toAdd.length);
+        })
+        .catch(function(){});
+}
+function tcpToast(msg,duration){
+    var t=document.getElementById('tcp-toast');
+    if(!t){
+        t=document.createElement('div');t.id='tcp-toast';
+        t.style.cssText='position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:#002856;color:white;padding:8px 20px;border-radius:6px;font-family:Arial,sans-serif;font-size:12px;font-weight:bold;z-index:99999;box-shadow:0 3px 10px rgba(0,0,0,.3);transition:opacity .4s;pointer-events:none;';
+        document.body.appendChild(t);
+    }
+    t.textContent=msg;t.style.opacity='1';
+    clearTimeout(t._timer);
+    t._timer=setTimeout(function(){t.style.opacity='0';},duration||4000);
+}
+document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlanner();tcpRenderAlias();SC='created';SA=true;sortBy('created');setTimeout(updCounter,300);setTimeout(updCounter,800);setTimeout(tcpCheckCollegaSilent,3000);});
 <\/script>
 </head><body style="display:flex;flex-direction:column;height:100vh;overflow:hidden;">
 
@@ -3225,13 +3670,13 @@ document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlann
         &nbsp;|&nbsp;
         ${[["20'","20'"],["40'","40'"],["40HC","40HC"]].map(([l,v])=>`<label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="nco" value="${v}"> ${l}</label>`).join('')}
         &nbsp;|&nbsp;
-        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntt" value="import" onclick="applyTTFilter()"> Import</label>
-        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntt" value="export" onclick="applyTTFilter()"> Export</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntt" value="import"> Import</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntt" value="export"> Export</label>
         &nbsp;|&nbsp;
         <span style="color:#666;">Porto:</span>
-        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntp" value="la spezia" onclick="applyTTFilter()"> SPZ</label>
-        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntp" value="livorno" onclick="applyTTFilter()"> LIV</label>
-        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntp" value="genova" onclick="applyTTFilter()"> GOA</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntp" value="la spezia"> SPZ</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntp" value="livorno"> LIV</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="ntp" value="genova"> GOA</label>
     </div>
     <div id="filter-bar" style="background:#f0f4fa;border-bottom:1px solid #d0dff0;padding:6px 12px;font-size:11px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-weight:bold;color:#002856;">👁 Mostra solo:</span>
@@ -3289,6 +3734,15 @@ document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlann
         <textarea id="import-pair-txt" rows="3" style="width:100%;border:1px solid #aac4e0;border-radius:4px;padding:5px 7px;font-size:11px;font-family:Arial,sans-serif;resize:vertical;color:#002856;" placeholder="Incolla qui il testo copiato dal collega con 📋 Copia"></textarea>
         <button onclick="importPair(document.getElementById('import-pair-txt').value)" style="margin-top:5px;background:#002856;color:white;border:none;border-radius:4px;padding:5px 14px;cursor:pointer;font-size:11px;font-weight:bold;">📥 Importa</button>
         <button onclick="removePair(document.getElementById('import-pair-txt').value)" style="margin-top:5px;margin-left:6px;background:#a93226;color:white;border:none;border-radius:4px;padding:5px 14px;cursor:pointer;font-size:11px;font-weight:bold;">X Rimuovi</button>
+    </div>
+    <div style="padding:8px 16px 10px;border-bottom:1px solid #d0dff0;background:#f0f5ff;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <span style="font-size:11px;font-weight:bold;color:#002856;margin-right:4px;">&#128230; Condivisione:</span>
+        <button id="btn-gist-publish" data-label="&#9729; Pubblica" onclick="tcpPublishGist()" style="background:#002856;color:white;border:none;border-radius:4px;padding:4px 11px;cursor:pointer;font-size:11px;font-weight:bold;">&#9729; Pubblica</button>
+        <button id="btn-gist-sync" data-label="&#8635; Sincronizza" onclick="tcpSyncGist()" style="background:#1a65b8;color:white;border:none;border-radius:4px;padding:4px 11px;cursor:pointer;font-size:11px;font-weight:bold;">&#8635; Sincronizza</button>
+        <button id="btn-gist-syncpub" data-label="&#8644; Sync+Pubblica" onclick="tcpSyncAndPublish()" style="background:#6a1fb8;color:white;border:none;border-radius:4px;padding:4px 11px;cursor:pointer;font-size:11px;font-weight:bold;">&#8644; Sync+Pubblica</button>
+        <label style="background:#1a7a1a;color:white;border:none;border-radius:4px;padding:4px 11px;cursor:pointer;font-size:11px;font-weight:bold;">&#128194; Importa file<input type="file" accept=".tcp,.json" style="display:none;" onchange="tcpImportPairsFile(this)"></label>
+        <button onclick="tcpExportPairs()" style="background:#27ae60;color:white;border:none;border-radius:4px;padding:4px 11px;cursor:pointer;font-size:11px;font-weight:bold;">&#128228; Esporta file</button>
+        <button onclick="tcpGistSettings()" style="background:#888;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px;">&#9881; Impostazioni</button>
     </div>
     <div id="pairs-content" style="padding:6px 16px;">${pairsHtml(pairs)}</div>
 </div>
@@ -3605,9 +4059,6 @@ window.tcpApplicaMerge=function(){
       <label style="font-size:11px;color:#555;">Km<br>
         <input id="tcp-km-modal-km" type="number" placeholder="es. 320" style="width:100%;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;margin-top:3px;">
       </label>
-      <label style="font-size:11px;color:#555;">Costo grezzo €<br>
-        <input id="tcp-km-modal-costo" type="number" placeholder="es. 800" style="width:100%;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;margin-top:3px;">
-      </label>
     </div>
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
       <button onclick="document.getElementById('tcp-km-modal').style.display='none'" style="background:#aaa;color:white;border:none;border-radius:5px;padding:7px 16px;cursor:pointer;font-size:12px;">Annulla</button>
@@ -3699,6 +4150,44 @@ window.tcpApplicaMerge=function(){
   </div>
 </div>
 
+<!-- MODAL GIST SETTINGS -->
+<div id="gist-settings-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10003;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:10px;padding:24px;min-width:420px;box-shadow:0 8px 32px rgba(0,0,0,.3);">
+    <h3 style="margin:0 0 6px;color:#002856;font-size:14px;">&#9881; Impostazioni Gist GitHub</h3>
+    <p style="font-size:11px;color:#888;margin-bottom:14px;">Crea un Personal Access Token su GitHub (Settings &rarr; Developer settings &rarr; Fine-grained tokens) con scope <b>Gist</b>. Il Gist ID viene generato automaticamente alla prima pubblicazione.</p>
+    <div style="display:grid;gap:10px;">
+      <label style="font-size:11px;color:#555;">Token GitHub *<br>
+        <input id="gist-token-input" type="password" placeholder="github_pat_..." style="width:100%;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;margin-top:3px;font-family:monospace;">
+      </label>
+      <label style="font-size:11px;color:#555;">Mio Gist ID (auto-compilato alla prima pubblicazione)<br>
+        <input id="gist-id-input" type="text" placeholder="es. a1b2c3d4e5f6..." style="width:100%;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;margin-top:3px;font-family:monospace;">
+      </label>
+      <label style="font-size:11px;color:#555;">Gist ID collega (ricevuto dal collega - da cui sincronizzi)<br>
+        <input id="gist-id-collega-input" type="text" placeholder="es. b2c3d4e5f6a1..." style="width:100%;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;margin-top:3px;font-family:monospace;">
+      </label>
+      <p style="font-size:11px;color:#888;">Ognuno pubblica sul proprio Gist e legge da quello del collega. Usa Sync+Pubblica per fare tutto in un colpo.</p>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;align-items:center;">
+      <span id="gist-save-note" style="font-size:11px;color:#27ae60;margin-right:auto;"></span>
+      <button onclick="tcpCloseGistSettings()" style="background:#aaa;color:white;border:none;border-radius:5px;padding:7px 16px;cursor:pointer;font-size:12px;">Annulla</button>
+      <button onclick="tcpSaveGistSettings()" style="background:#002856;color:white;border:none;border-radius:5px;padding:7px 16px;cursor:pointer;font-size:12px;font-weight:bold;">&#10003; Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL MERGE RIUTILIZZI -->
+<div id="merge-pairs-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10003;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:10px;padding:24px;width:640px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.3);">
+    <h3 style="margin:0 0 6px;color:#002856;font-size:14px;">&#8704; Merge Riutilizzi</h3>
+    <p id="mpm-summary" style="font-size:11px;color:#555;margin-bottom:14px;"></p>
+    <div id="mpm-conflicts" style="margin-bottom:14px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="tcpCloseMergePairsModal()" style="background:#aaa;color:white;border:none;border-radius:5px;padding:7px 16px;cursor:pointer;font-size:12px;">Annulla</button>
+      <button onclick="tcpApplyMergePairsModal()" style="background:#1a65b8;color:white;border:none;border-radius:5px;padding:7px 16px;cursor:pointer;font-size:12px;font-weight:bold;">&#10003; Applica</button>
+    </div>
+  </div>
+</div>
+
 </body></html>`;
 }
 
@@ -3750,7 +4239,7 @@ function getFormSettings() {
     const ev = parseInt(document.getElementById('mon-ev')?.value) || 24;
     const eu = document.getElementById('mon-eu')?.value || 'hours';
     return {
-        interval:    parseInt(document.getElementById('mon-int')?.value) || 10,
+        interval:    10,
         intervalMin: eu === 'days' ? ev * 1440 : ev * 60,
         extractVal:  ev,
         extractUnit: eu,
@@ -3781,6 +4270,21 @@ function stop() {
 // ────────────────────────────────────────────────
 //  WIDGET GESTIONALE
 // ────────────────────────────────────────────────
+function tcpToggleAutoGist(mode) {
+    var st = ss.load() || {};
+    st.autoGist = (st.autoGist === mode) ? null : mode;
+    ss.save(st);
+    var map = {sync:'mon-auto-sync', pub:'mon-auto-pub', syncpub:'mon-auto-syncpub'};
+    var colors = {sync:'#1a65b8', pub:'#1a65b8', syncpub:'#6a1fb8'};
+    Object.keys(map).forEach(function(k) {
+        var b = document.getElementById(map[k]);
+        if (!b) return;
+        var active = st.autoGist === k;
+        b.style.background = active ? colors[k] : '#e8ecf4';
+        b.style.color = active ? 'white' : '#002856';
+    });
+}
+
 function buildWidget() {
     if (document.getElementById('tcp-mon-widget')) return;
     const state = ss.load();
@@ -3799,13 +4303,10 @@ function buildWidget() {
                 <option value="days" ${state?.extractUnit==='days'?'selected':''}>giorni</option>
             </select>
         </div>
-        <div style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:7px;">
-            <label style="white-space:nowrap;display:flex;align-items:center;gap:3px;">
-                <input id="mon-auto" type="checkbox" ${state?.autoRun?'checked':''}> Auto ogni
-            </label>
-            <input id="mon-int" type="number" value="${state?.interval||10}" min="1" max="120"
-                style="width:36px;border:1px solid #002856;border-radius:3px;padding:2px 3px;color:#002856;font-size:11px;">
-            <span>min</span>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-bottom:7px;">
+            <button id="mon-auto-sync" style="background:${state?.autoGist==='sync'?'#1a65b8':'#e8ecf4'};color:${state?.autoGist==='sync'?'white':'#002856'};border:1px solid #002856;border-radius:4px;padding:3px 2px;font-size:10px;font-weight:bold;cursor:pointer;">Auto Sync</button>
+            <button id="mon-auto-pub" style="background:${state?.autoGist==='pub'?'#1a65b8':'#e8ecf4'};color:${state?.autoGist==='pub'?'white':'#002856'};border:1px solid #002856;border-radius:4px;padding:3px 2px;font-size:10px;font-weight:bold;cursor:pointer;">Auto Pub</button>
+            <button id="mon-auto-syncpub" style="background:${state?.autoGist==='syncpub'?'#6a1fb8':'#e8ecf4'};color:${state?.autoGist==='syncpub'?'white':'#002856'};border:1px solid #002856;border-radius:4px;padding:3px 2px;font-size:10px;font-weight:bold;cursor:pointer;">Sync+Pub</button>
         </div>
         <div style="font-weight:bold;margin-bottom:3px;font-size:11px;">Compagnie:</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-bottom:7px;font-size:11px;">
@@ -3823,6 +4324,12 @@ function buildWidget() {
         <div id="mon-status" style="font-size:10px;color:#777;text-align:center;">${state?.lastScan?'Ultima: '+state.lastScan:'–'}</div>
     `;
     document.body.appendChild(box);
+    tcpMakeDraggable(box, 'tcp_widget_monitor_pos');
+    ['sync','pub','syncpub'].forEach(function(mode) {
+        var bid = mode === 'syncpub' ? 'mon-auto-syncpub' : 'mon-auto-' + mode;
+        var b = document.getElementById(bid);
+        if (b) b.addEventListener('click', function() { tcpToggleAutoGist(mode); });
+    });
     statusEl = document.getElementById('mon-status');
 
     function _updateScanBtnColor() {
@@ -3840,18 +4347,40 @@ function buildWidget() {
 
     document.getElementById('mon-btn').addEventListener('click', () => {
         const s = getFormSettings();
-        s.autoRun = document.getElementById('mon-auto')?.checked || false;
+        const st = ss.load() || {};
+        s.autoGist = st.autoGist || null;
+        s.autoRun = false;
         const now = new Date();
         s.lastScan = now.toLocaleTimeString('it-IT');
         s.lastScanTs = now.getTime();
-        s.running = s.autoRun;
+        s.running = false;
         ss.save(s);
         clearTimeout(timer);
         const { newCount, newIds, modIds } = collect(s.intervalMin, s.carriers, s.containers);
         openOrUpdate(s, s.lastScan, newCount, newIds, modIds);
         setStatus('Scansione: ' + s.lastScan + ' (+' + newCount + ')');
         document.getElementById('mon-btn').style.background = '#002856';
-        if (s.autoRun) { timer = setTimeout(doSearch, s.interval * 60000); }
+        // Auto Gist dopo scansione
+        var autoGist = s.autoGist;
+        if (autoGist === 'sync') {
+            setTimeout(function() {
+                if (window.tcpMonitorWin && !window.tcpMonitorWin.closed && window.tcpMonitorWin.tcpSyncGist) {
+                    window.tcpMonitorWin.tcpSyncGist();
+                }
+            }, 1500);
+        } else if (autoGist === 'pub') {
+            setTimeout(function() {
+                if (window.tcpMonitorWin && !window.tcpMonitorWin.closed && window.tcpMonitorWin.tcpPublishGist) {
+                    window.tcpMonitorWin.tcpPublishGist();
+                }
+            }, 1500);
+        } else if (autoGist === 'syncpub') {
+            setTimeout(function() {
+                if (window.tcpMonitorWin && !window.tcpMonitorWin.closed && window.tcpMonitorWin.tcpSyncAndPublish) {
+                    window.tcpMonitorWin.tcpSyncAndPublish();
+                }
+            }, 1500);
+        }
     });
 }
 
@@ -3873,4 +4402,4 @@ waitForTable(() => {
 });
 
 
-})(); // fine TCP Completo v4.1
+})(); // fine S.R.C v1.0 | (c) 2026 Vittorio Zingoni
