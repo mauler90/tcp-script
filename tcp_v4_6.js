@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
@@ -2895,11 +2895,6 @@ function tcpShowSyncModal(payload){
     var m=document.getElementById('merge-pairs-modal');if(!m)return;
     var sumEl=document.getElementById('mpm-summary');
     var confEl=document.getElementById('mpm-conflicts');
-    var sum='';
-    if(result.toAdd.length)sum+=result.toAdd.length+' nuovi da aggiungere. ';
-    if(result.ignored)sum+=result.ignored+' gia presenti ignorati. ';
-    if(result.conflicts.length)sum+=result.conflicts.length+' conflitti da risolvere.';
-    if(!result.toAdd.length&&!result.conflicts.length)sum='Nessuna differenza, tutto gia aggiornato.';
     var pD=payload.pairs||payload;
     var tD=payload.tratte||{toAdd:[],conflicts:[],ignored:0};
     var rD=payload.tariffario||{toAdd:[],conflicts:[],ignored:0};
@@ -3573,28 +3568,30 @@ function tcpPairTitle(dl,count){
     return '📅 Riutilizzi del '+dl+' &nbsp;·&nbsp; <span style="color:#555;font-weight:normal;font-size:12px;">'+count+(count===1?' abbinamento':' abbinamenti')+'</span>'+badge;
 }
 // -- CONTROLLO SILENZIOSO GIST COLLEGA --
-function tcpSetPairsBadge(n){
-    // Badge sul tab
+function tcpSetPairsBadge(nPairs,nTratte){
+    nPairs=nPairs||0;nTratte=nTratte||0;
+    var tot=nPairs+nTratte;
+    // Badge sul tab Riutilizzi
     var btn=document.querySelector('.tb[data-t="pairs"]');
     if(btn){
         var existing=btn.querySelector('.tcp-new-badge');
-        if(n>0){
+        if(tot>0){
             if(!existing){
                 var badge=document.createElement('span');
                 badge.className='tcp-new-badge';
                 badge.style.cssText='background:#e74c3c;color:white;border-radius:10px;padding:1px 6px;font-size:9px;font-weight:bold;margin-left:5px;vertical-align:middle;';
-                badge.textContent='+'+n;
+                badge.textContent='+'+tot;
                 btn.appendChild(badge);
             }else{
-                existing.textContent='+'+n;
+                existing.textContent='+'+tot;
             }
         }else{
             if(existing)existing.remove();
         }
     }
-    // Widget floating colleghi - costruito con createElement per evitare problemi escaping
+    // Widget floating colleghi
     var w=document.getElementById('tcp-colleghi-widget');
-    if(n>0){
+    if(tot>0){
         if(!w){
             w=document.createElement('div');
             w.id='tcp-colleghi-widget';
@@ -3612,8 +3609,12 @@ function tcpSetPairsBadge(n){
             w.appendChild(ico);w.appendChild(msg);w.appendChild(btnSync);w.appendChild(btnClose);
             document.body.appendChild(w);
         }
+        // Build message
+        var parts=[];
+        if(nPairs>0)parts.push('+'+nPairs+' riutil'+(nPairs===1?'izzo':'izzi'));
+        if(nTratte>0)parts.push('+'+nTratte+' tratt'+(nTratte===1?'a':'e'));
         var msgEl=document.getElementById('tcp-colleghi-msg');
-        if(msgEl)msgEl.textContent='Collega: +'+n+' riutil'+(n===1?'izzo':'izzi');
+        if(msgEl)msgEl.textContent='Collega: '+parts.join(', ');
     }else{
         if(w)w.remove();
     }
@@ -3625,13 +3626,27 @@ function tcpCheckCollegaSilent(){
     fetch('https://api.github.com/gists/'+gidc,{headers:{'Authorization':'Bearer '+tok}})
         .then(function(r){return r.json();})
         .then(function(data){
-            if(!data.files||!data.files['tcp_pairs.json'])return;
-            var parsed=JSON.parse(data.files['tcp_pairs.json'].content);
-            if(!parsed.pairs||!Array.isArray(parsed.pairs))return;
-            var result=tcpDoMerge(parsed.pairs);
-            tcpSetPairsBadge(result.toAdd.length);
+            if(!data.files)return;
+            var newPairs=0,newTratte=0;
+            if(data.files['tcp_pairs.json']){
+                var pp=JSON.parse(data.files['tcp_pairs.json'].content);
+                if(pp.pairs)newPairs=tcpDoMerge(pp.pairs).toAdd.length;
+            }
+            if(data.files['tcp_tratte.json']){
+                var tt=JSON.parse(data.files['tcp_tratte.json'].content);
+                if(tt.tratte)newTratte=tcpDoMergeTratte(tt.tratte).toAdd.length;
+            }
+            tcpSetPairsBadge(newPairs,newTratte);
         })
         .catch(function(){});
+}
+var _checkCollegaTimer=null;
+function tcpStartAutoCheck(intervalMin){
+    if(_checkCollegaTimer)clearInterval(_checkCollegaTimer);
+    if(!intervalMin||intervalMin<=0)return;
+    _checkCollegaTimer=setInterval(function(){
+        tcpCheckCollegaSilent();
+    },intervalMin*60000);
 }
 function tcpToast(msg,duration){
     var t=document.getElementById('tcp-toast');
@@ -3644,7 +3659,11 @@ function tcpToast(msg,duration){
     clearTimeout(t._timer);
     t._timer=setTimeout(function(){t.style.opacity='0';},duration||4000);
 }
-document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlanner();tcpRenderAlias();SC='created';SA=true;sortBy('created');setTimeout(updCounter,300);setTimeout(updCounter,800);setTimeout(tcpCheckCollegaSilent,3000);});
+document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlanner();tcpRenderAlias();SC='created';SA=true;sortBy('created');setTimeout(updCounter,300);setTimeout(updCounter,800);setTimeout(function(){
+        tcpCheckCollegaSilent();
+        var _ci=parseInt(localStorage.getItem('tcp_gist_check_interval')||'0');
+        if(_ci>0)tcpStartAutoCheck(_ci);
+    },3000);});
 <\/script>
 </head><body style="display:flex;flex-direction:column;height:100vh;overflow:hidden;">
 
@@ -4238,13 +4257,15 @@ function doSearch() {
 function getFormSettings() {
     const ev = parseInt(document.getElementById('mon-ev')?.value) || 24;
     const eu = document.getElementById('mon-eu')?.value || 'hours';
+    var ci = parseInt(document.getElementById('mon-check-interval')?.value) || 0;
     return {
-        interval:    10,
-        intervalMin: eu === 'days' ? ev * 1440 : ev * 60,
-        extractVal:  ev,
-        extractUnit: eu,
-        carriers:    ['MSC','Hapag','ONE','CMA','OOCL','ZIM','Yang Ming','Maersk','Evergreen'].filter(c => document.getElementById('mon-c-'+c.replace(' ',''))?.checked),
-        containers:  ["20'","40'","40HC"].filter(t => document.getElementById('mon-t-'+t.replace("'",""))?.checked),
+        interval:      10,
+        intervalMin:   eu === 'days' ? ev * 1440 : ev * 60,
+        extractVal:    ev,
+        extractUnit:   eu,
+        checkInterval: ci,
+        carriers:      ['MSC','Hapag','ONE','CMA','OOCL','ZIM','Yang Ming','Maersk','Evergreen'].filter(c => document.getElementById('mon-c-'+c.replace(' ',''))?.checked),
+        containers:    ["20'","40'","40HC"].filter(t => document.getElementById('mon-t-'+t.replace("'",""))?.checked),
     };
 }
 
@@ -4303,6 +4324,12 @@ function buildWidget() {
                 <option value="days" ${state?.extractUnit==='days'?'selected':''}>giorni</option>
             </select>
         </div>
+        <div style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:5px;">
+            <span style="white-space:nowrap;">Controlla collega ogni:</span>
+            <input id="mon-check-interval" type="number" min="0" max="999" value="${state?.checkInterval||10}"
+                style="width:36px;border:1px solid #002856;border-radius:3px;padding:2px 3px;color:#002856;font-size:11px;">
+            <span>min (0=mai)</span>
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-bottom:7px;">
             <button id="mon-auto-sync" style="background:${state?.autoGist==='sync'?'#1a65b8':'#e8ecf4'};color:${state?.autoGist==='sync'?'white':'#002856'};border:1px solid #002856;border-radius:4px;padding:3px 2px;font-size:10px;font-weight:bold;cursor:pointer;">Auto Sync</button>
             <button id="mon-auto-pub" style="background:${state?.autoGist==='pub'?'#1a65b8':'#e8ecf4'};color:${state?.autoGist==='pub'?'white':'#002856'};border:1px solid #002856;border-radius:4px;padding:3px 2px;font-size:10px;font-weight:bold;cursor:pointer;">Auto Pub</button>
@@ -4360,6 +4387,11 @@ function buildWidget() {
         openOrUpdate(s, s.lastScan, newCount, newIds, modIds);
         setStatus('Scansione: ' + s.lastScan + ' (+' + newCount + ')');
         document.getElementById('mon-btn').style.background = '#002856';
+        // Save check interval and restart auto-check
+        localStorage.setItem('tcp_gist_check_interval', String(s.checkInterval || 0));
+        if (win && !win.closed && win.tcpStartAutoCheck) {
+            win.tcpStartAutoCheck(s.checkInterval || 0);
+        }
         // Auto Gist dopo scansione
         var autoGist = s.autoGist;
         if (autoGist === 'sync') {
