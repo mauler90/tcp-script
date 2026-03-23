@@ -4253,19 +4253,15 @@ let win = null;
 
 
 function openOrUpdate(settings, lastUpdate, newCount, newIds, modIds) {
+    if (!win || win.closed)
+        win = window.open('', 'tcp_monitor_win', 'width=1500,height=850,resizable=yes,scrollbars=yes');
+    window.tcpMonitorWin = win;
     const html = buildHTML(ls.orders(), settings, lastUpdate, newCount, newIds, modIds);
-    const blob = new Blob([html], {type: 'text/html; charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    if (!win || win.closed) {
-        win = window.open(url, 'tcp_monitor_win', 'width=1500,height=850,resizable=yes,scrollbars=yes');
-        window.tcpMonitorWin = win;
-        setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
-    } else {
-        window.tcpMonitorWin = win;
-        win.location.replace(url);
-        setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
-    }
-    setTimeout(function() { try{ win.showTab('viaggi'); }catch(e){} }, 300);
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    // Forza layout flex su #t-viaggi dopo rebuild
+    try{ win.showTab('viaggi'); }catch(e){}
 }
 
 // ────────────────────────────────────────────────
