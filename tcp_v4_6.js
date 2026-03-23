@@ -2729,7 +2729,17 @@ function tcpDoMerge(incoming){
             }
         }
         if(!found){toAdd.push(inc);}
-        else if(foundType==='exact'){ignored++;}
+        else if(foundType==='exact'){
+            // Controlla se qualcosa e' cambiato (indirizzo, tappa, delivery)
+            var changed=[];
+            if(t(found.imp.address)!==t(inc.imp.address))changed.push('Indirizzo IMP');
+            if(t(found.exp.address)!==t(inc.exp.address))changed.push('Indirizzo EXP');
+            if(t(found.imp.delivery)!==t(inc.imp.delivery))changed.push('Delivery IMP');
+            if(t(found.exp.delivery)!==t(inc.exp.delivery))changed.push('Delivery EXP');
+            if(t(found.tappa||'')!==t(inc.tappa||''))changed.push('Tappa');
+            if(changed.length){conflicts.push({inc:inc,ex:found,type:'conflict-modified',changed:changed});}
+            else{ignored++;}
+        }
         else{conflicts.push({inc:inc,ex:found,type:foundType});}
     });
     return{toAdd:toAdd,conflicts:conflicts,ignored:ignored};
@@ -2741,7 +2751,18 @@ function tcpApplyMergePairs(toAdd,conflictResolutions){
     conflictResolutions.forEach(function(res){
         if(res.choice==='theirs'){
             var idx=pairs.findIndex(function(p){return p===res.ex;});
-            if(idx>=0)pairs[idx]=res.inc;
+            if(idx<0)return;
+            if(res.type==='conflict-modified'){
+                // Aggiorna campi modificati e azzera km (percorso cambiato)
+                pairs[idx].imp.address=res.inc.imp.address;
+                pairs[idx].imp.delivery=res.inc.imp.delivery;
+                pairs[idx].exp.address=res.inc.exp.address;
+                pairs[idx].exp.delivery=res.inc.exp.delivery;
+                if(res.inc.tappa!==undefined)pairs[idx].tappa=res.inc.tappa;
+                pairs[idx].km=0;
+            }else{
+                pairs[idx]=res.inc;
+            }
         }
     });
     sp(pairs);rPairs();rPlanner();
@@ -2912,14 +2933,25 @@ function tcpShowSyncModal(payload){
         if((pD.conflicts||[]).length){
             html+='<div style="font-weight:bold;color:#002856;font-size:12px;margin:8px 0 4px;">Riutilizzi</div>';
             html+=(pD.conflicts||[]).map(function(cf,ci){
-                var _f=cf.type==='conflict-exp'?'Nr.EXP diverso':'Nr.IMP diverso';
+                var _f=cf.type==='conflict-modified'
+                    ?'Riutilizzo modificato: '+cf.changed.join(', ')
+                    :(cf.type==='conflict-exp'?'Nr.EXP diverso':'Nr.IMP diverso');
+                var _badgeColor=cf.type==='conflict-modified'?'#c47a00':'#002856';
                 return '<div style="border:1px solid #d0dff0;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;">'
-                    +'<div style="font-weight:bold;color:#002856;margin-bottom:4px;">'+_f+'</div>'
+                    +'<div style="font-weight:bold;margin-bottom:4px;color:'+_badgeColor+';">'+_f+'</div>'
                     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">'
                     +'<div style="background:#f0f4fa;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">MIO</div>'
-                    +'<div>'+cf.ex.imp.carrier+' '+cf.ex.imp.cont+'</div><div>'+cf.ex.imp.address+'</div></div>'
+                    +'<div>'+cf.ex.imp.carrier+' '+cf.ex.imp.cont+'</div>'
+                    +'<div style="font-size:10px;">IMP: '+cf.ex.imp.address+'</div>'
+                    +'<div style="font-size:10px;">EXP: '+cf.ex.exp.address+'</div>'
+                    +(cf.ex.tappa?'<div style="font-size:10px;color:#1a7a1a;">Tappa: '+cf.ex.tappa+'</div>':'')
+                    +'</div>'
                     +'<div style="background:#f0f8f0;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">COLLEGA</div>'
-                    +'<div>'+cf.inc.imp.carrier+' '+cf.inc.imp.cont+'</div><div>'+cf.inc.imp.address+'</div></div></div>'
+                    +'<div>'+cf.inc.imp.carrier+' '+cf.inc.imp.cont+'</div>'
+                    +'<div style="font-size:10px;">IMP: '+cf.inc.imp.address+'</div>'
+                    +'<div style="font-size:10px;">EXP: '+cf.inc.exp.address+'</div>'
+                    +(cf.inc.tappa?'<div style="font-size:10px;color:#1a7a1a;">Tappa: '+cf.inc.tappa+'</div>':'')
+                    +'</div></div>'
                     +'<div style="display:flex;gap:6px;">'
                     +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #1a65b8;font-size:11px;"><input type="radio" name="mpc'+ci+'" value="mine" checked> <span style="color:#1a65b8;font-weight:bold;">Il mio</span></label>'
                     +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #27ae60;font-size:11px;"><input type="radio" name="mpc'+ci+'" value="theirs"> <span style="color:#27ae60;font-weight:bold;">Collega</span></label>'
