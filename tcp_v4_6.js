@@ -1333,16 +1333,23 @@ function collect(intervalMin, carriers, containers) {
             const id       = contNr || (traffic + created + rawCarrier);
             const _exO = existing.find(x => x.id === id);
             if (_exO) {
-                const _dlvN  = cr.querySelector('td:nth-child(6)')?.innerText.trim() || '';
-                const _plN   = cr.querySelector('td:nth-child(7)')?.innerText.replace(/\[[^\]]+\]\s*/g,'').trim() || '';
-                const _pdN   = cr.querySelector('td:nth-child(8)')?.innerText.replace(/\[[^\]]+\]\s*/g,'').trim() || '';
-                const _portN = traffic.toLowerCase() === 'import' ? _pdN : _plN;
-                const _ldvN  = cr.querySelector('td:nth-child(12)')?.innerText.trim() || '';
-                if (_exO.delivery !== _dlvN || _exO.port !== _portN || _exO.ldv !== _ldvN || _exO.address !== address) {
+                const _dlvN     = cr.querySelector('td:nth-child(6)')?.innerText.trim() || '';
+                const _plN      = cr.querySelector('td:nth-child(7)')?.innerText.replace(/\[[^\]]+\]\s*/g,'').trim() || '';
+                const _pdN      = cr.querySelector('td:nth-child(8)')?.innerText.replace(/\[[^\]]+\]\s*/g,'').trim() || '';
+                const _portN    = traffic.toLowerCase() === 'import' ? _pdN : _plN;
+                const _ldvN     = cr.querySelector('td:nth-child(12)')?.innerText.trim() || '';
+                const _carrierN = ncr(rawCarrier) || _exO.carrier;
+                const _contN    = nct(rawCont) || _exO.cont;
+                if (_exO.delivery !== _dlvN || _exO.port !== _portN || _exO.ldv !== _ldvN ||
+                    _exO.address !== address || _exO.carrier !== _carrierN || _exO.cont !== _contN ||
+                    _exO.branch !== branch) {
                     _exO.delivery   = _dlvN;
                     _exO.port       = _portN;
                     _exO.ldv        = _ldvN;
                     _exO.address    = address;
+                    _exO.carrier    = _carrierN;
+                    _exO.cont       = _contN;
+                    _exO.branch     = branch;
                     _exO.isModified = true;
                     _exO.modifiedAt = now.toISOString();
                 }
@@ -2157,7 +2164,7 @@ function tcpMaskTime(el){var v=el.value.replace(/[^0-9]/g,'');if(v.length>2)v=v.
 // ── REFRESH TABELLA ──
 function tcpRefresh(){
     const orders=lo();
-    const pid=pairedIds();
+    const pid=pids();
     orders.forEach(o=>{
         const sid=o.id.replace(/[^a-z0-9]/gi,'_');
         const row=document.getElementById('row-'+sid);
@@ -2293,7 +2300,7 @@ function saveAddManual(){
     // Ricostruisce solo il tbody senza rebuild completo
     const tbody=document.getElementById('tbody');
     if(tbody){
-        const pid=pairedIds();
+        const pid=pids();
         const nset=new Set();
         const o=orders[0];
         const sid=o.id.replace(/[^a-z0-9]/gi,'_');
@@ -2552,8 +2559,6 @@ function _pushUndo(){
     s.push(JSON.stringify(lp()));
     if(s.length>5)s.shift();
     _setUndoStack(s);
-    var btn=document.getElementById('btn-undo');
-    if(btn)btn.style.display='inline-block';
 }
 function tcpUndo(){
     var s=_getUndoStack();
@@ -2561,11 +2566,9 @@ function tcpUndo(){
     sp(JSON.parse(s.pop()));
     _setUndoStack(s);
     rPairs();
-    var btn=document.getElementById('btn-undo');
-    if(btn)btn.style.display=s.length?'inline-block':'none';
 }
 // Ripristina visibilità bottone undo al caricamento
-(function(){if(_getUndoStack().length){var b=document.getElementById('btn-undo');if(b)b.style.display='inline-block';}})();
+
 function tcpCopiaExcel(i){
     const p=lp()[i];if(!p)return;
     function _carrier(s){var m={'MSC':'MSC','Hapag':'HAPAG','ONE':'ONE','CMA':'CMA','OOCL':'OOCL','ZIM':'ZIM','Yang Ming':'YANG MING','Maersk':'MAERSK'};return m[s]||s||'';}
@@ -2729,17 +2732,7 @@ function tcpDoMerge(incoming){
             }
         }
         if(!found){toAdd.push(inc);}
-        else if(foundType==='exact'){
-            // Controlla se qualcosa e' cambiato (indirizzo, tappa, delivery)
-            var changed=[];
-            if(t(found.imp.address)!==t(inc.imp.address))changed.push('Indirizzo IMP');
-            if(t(found.exp.address)!==t(inc.exp.address))changed.push('Indirizzo EXP');
-            if(t(found.imp.delivery)!==t(inc.imp.delivery))changed.push('Delivery IMP');
-            if(t(found.exp.delivery)!==t(inc.exp.delivery))changed.push('Delivery EXP');
-            if(t(found.tappa||'')!==t(inc.tappa||''))changed.push('Tappa');
-            if(changed.length){conflicts.push({inc:inc,ex:found,type:'conflict-modified',changed:changed});}
-            else{ignored++;}
-        }
+        else if(foundType==='exact'){ignored++;}
         else{conflicts.push({inc:inc,ex:found,type:foundType});}
     });
     return{toAdd:toAdd,conflicts:conflicts,ignored:ignored};
@@ -2751,18 +2744,7 @@ function tcpApplyMergePairs(toAdd,conflictResolutions){
     conflictResolutions.forEach(function(res){
         if(res.choice==='theirs'){
             var idx=pairs.findIndex(function(p){return p===res.ex;});
-            if(idx<0)return;
-            if(res.type==='conflict-modified'){
-                // Aggiorna campi modificati e azzera km (percorso cambiato)
-                pairs[idx].imp.address=res.inc.imp.address;
-                pairs[idx].imp.delivery=res.inc.imp.delivery;
-                pairs[idx].exp.address=res.inc.exp.address;
-                pairs[idx].exp.delivery=res.inc.exp.delivery;
-                if(res.inc.tappa!==undefined)pairs[idx].tappa=res.inc.tappa;
-                pairs[idx].km=0;
-            }else{
-                pairs[idx]=res.inc;
-            }
+            if(idx>=0)pairs[idx]=res.inc;
         }
     });
     sp(pairs);rPairs();rPlanner();
@@ -2793,12 +2775,10 @@ function tcpPublishGist(){
     var pairs=lp();
     var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
     var alias=[];try{alias=JSON.parse(localStorage.getItem('tcp_tratte_alias')||'[]');}catch(e){}
-    var tar=[];try{tar=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
     var files={
         'tcp_pairs.json':{content:JSON.stringify({version:1,exported:ts,pairs:pairs},null,2)},
         'tcp_tratte.json':{content:JSON.stringify({version:1,exported:ts,tratte:tratte},null,2)},
-        'tcp_alias.json':{content:JSON.stringify({version:1,exported:ts,alias:alias},null,2)},
-        'tcp_tariffario.json':{content:JSON.stringify({version:1,exported:ts,tariffario:tar},null,2)}
+        'tcp_alias.json':{content:JSON.stringify({version:1,exported:ts,alias:alias},null,2)}
     };
     var body=JSON.stringify({description:'S.R.C sync',public:false,files:files});
     var url=gid?'https://api.github.com/gists/'+gid:'https://api.github.com/gists';
@@ -2878,12 +2858,7 @@ function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
                 var aa=JSON.parse(data.files['tcp_alias.json'].content);
                 if(aa.alias)tcpDoMergeAlias(aa.alias);
             }
-            var tarResult={toAdd:[],conflicts:[],ignored:0};
-            if(data.files['tcp_tariffario.json']){
-                var tr=JSON.parse(data.files['tcp_tariffario.json'].content);
-                if(tr.tariffario)tarResult=tcpDoMergeTariffario(tr.tariffario);
-            }
-            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:tarResult,source:'gist',autoPublish:autoPublish};
+            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'gist',autoPublish:autoPublish};
             tcpSetPairsBadge(0);
             tcpShowSyncModal(_mergePayload);
         })
@@ -2913,45 +2888,42 @@ function tcpSyncAndPublish(){
 // -- MODAL MERGE RIUTILIZZI --
 function tcpShowMergePairsModal(result){tcpShowSyncModal({pairs:result,tratte:{toAdd:[],conflicts:[],ignored:0},tariffario:{toAdd:[],conflicts:[],ignored:0}});}
 function tcpShowSyncModal(payload){
-    var m=document.getElementById('merge-pairs-modal');if(!m)return;
-    var sumEl=document.getElementById('mpm-summary');
-    var confEl=document.getElementById('mpm-conflicts');
     var pD=payload.pairs||payload;
     var tD=payload.tratte||{toAdd:[],conflicts:[],ignored:0};
     var rD=payload.tariffario||{toAdd:[],conflicts:[],ignored:0};
     var totNew=(pD.toAdd||[]).length+(tD.toAdd||[]).length+(rD.toAdd||[]).length;
     var totConf=(pD.conflicts||[]).length+(tD.conflicts||[]).length+(rD.conflicts||[]).length;
     var totIgn=(pD.ignored||0)+(tD.ignored||0)+(rD.ignored||0);
+    // Se non ci sono conflitti: applica automaticamente e mostra toast
+    if(totConf===0){
+        _mergePayload=payload;
+        tcpApplyMergePairsModal();
+        var msg=totNew>0?('\u2713 Sync: +'+totNew+' nuovi aggiunti automaticamente.'):'\u2713 Sync: tutto aggiornato.';
+        tcpToast(msg,4000);
+        return;
+    }
+    // Ci sono conflitti: apri la tab
+    showTab('syncreport');
+    var sumEl=document.getElementById('sr-summary');
+    var confEl=document.getElementById('sr-conflicts');
     var sum='';
     if(totNew)sum+=totNew+' nuovi da aggiungere. ';
     if(totIgn)sum+=totIgn+' gia presenti ignorati. ';
     if(totConf)sum+=totConf+' conflitti da risolvere.';
-    if(!totNew&&!totConf)sum='Nessuna differenza, tutto gia aggiornato.';
     if(sumEl)sumEl.textContent=sum;
     if(confEl){
         var html='';
         if((pD.conflicts||[]).length){
             html+='<div style="font-weight:bold;color:#002856;font-size:12px;margin:8px 0 4px;">Riutilizzi</div>';
             html+=(pD.conflicts||[]).map(function(cf,ci){
-                var _f=cf.type==='conflict-modified'
-                    ?'Riutilizzo modificato: '+cf.changed.join(', ')
-                    :(cf.type==='conflict-exp'?'Nr.EXP diverso':'Nr.IMP diverso');
-                var _badgeColor=cf.type==='conflict-modified'?'#c47a00':'#002856';
+                var _f=cf.type==='conflict-exp'?'Nr.EXP diverso':'Nr.IMP diverso';
                 return '<div style="border:1px solid #d0dff0;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;">'
-                    +'<div style="font-weight:bold;margin-bottom:4px;color:'+_badgeColor+';">'+_f+'</div>'
+                    +'<div style="font-weight:bold;color:#002856;margin-bottom:4px;">'+_f+'</div>'
                     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">'
                     +'<div style="background:#f0f4fa;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">MIO</div>'
-                    +'<div>'+cf.ex.imp.carrier+' '+cf.ex.imp.cont+'</div>'
-                    +'<div style="font-size:10px;">IMP: '+cf.ex.imp.address+'</div>'
-                    +'<div style="font-size:10px;">EXP: '+cf.ex.exp.address+'</div>'
-                    +(cf.ex.tappa?'<div style="font-size:10px;color:#1a7a1a;">Tappa: '+cf.ex.tappa+'</div>':'')
-                    +'</div>'
+                    +'<div>'+cf.ex.imp.carrier+' '+cf.ex.imp.cont+'</div><div>'+cf.ex.imp.address+'</div></div>'
                     +'<div style="background:#f0f8f0;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">COLLEGA</div>'
-                    +'<div>'+cf.inc.imp.carrier+' '+cf.inc.imp.cont+'</div>'
-                    +'<div style="font-size:10px;">IMP: '+cf.inc.imp.address+'</div>'
-                    +'<div style="font-size:10px;">EXP: '+cf.inc.exp.address+'</div>'
-                    +(cf.inc.tappa?'<div style="font-size:10px;color:#1a7a1a;">Tappa: '+cf.inc.tappa+'</div>':'')
-                    +'</div></div>'
+                    +'<div>'+cf.inc.imp.carrier+' '+cf.inc.imp.cont+'</div><div>'+cf.inc.imp.address+'</div></div></div>'
                     +'<div style="display:flex;gap:6px;">'
                     +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #1a65b8;font-size:11px;"><input type="radio" name="mpc'+ci+'" value="mine" checked> <span style="color:#1a65b8;font-weight:bold;">Il mio</span></label>'
                     +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #27ae60;font-size:11px;"><input type="radio" name="mpc'+ci+'" value="theirs"> <span style="color:#27ae60;font-weight:bold;">Collega</span></label>'
@@ -2990,7 +2962,6 @@ function tcpShowSyncModal(payload){
         if(!html)html='<p style="color:#27ae60;font-size:12px;">Nessun conflitto.</p>';
         confEl.innerHTML=html;
     }
-    m.style.display='flex';
 }
 function tcpApplyMergePairsModal(){
     if(!_mergePayload)return;
@@ -3022,13 +2993,19 @@ function tcpApplyMergePairsModal(){
         if(sel&&sel.value==='theirs'){var ex=tar.find(function(x){return x.km===cf.ex.km;});if(ex){ex.c20=cf.inc.c20;ex.c40=cf.inc.c40;}}
     });
     localStorage.setItem('tcp_tariffario',JSON.stringify(tar));
-    document.getElementById('merge-pairs-modal').style.display='none';
     _mergePayload=null;
+    var srEl=document.getElementById('sr-conflicts');
+    if(srEl)srEl.innerHTML="<p style='color:#27ae60;font-size:12px;padding:20px;text-align:center;'>&#10003; Sync applicato.</p>";
+    var srSum=document.getElementById('sr-summary');
+    if(srSum)srSum.textContent='';
     if(autoPublish){setTimeout(function(){tcpPublishGist();},400);}
 }
 function tcpCloseMergePairsModal(){
-    document.getElementById('merge-pairs-modal').style.display='none';
     _mergePayload=null;
+    var srEl=document.getElementById('sr-conflicts');
+    if(srEl)srEl.innerHTML="<p style='color:#aaa;font-size:12px;padding:20px;text-align:center;'>Sync annullato.</p>";
+    var srSum=document.getElementById('sr-summary');
+    if(srSum)srSum.textContent='';
 }
 
 function cleanExpired(){
@@ -3692,7 +3669,43 @@ function tcpToast(msg,duration){
     clearTimeout(t._timer);
     t._timer=setTimeout(function(){t.style.opacity='0';},duration||4000);
 }
-document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlanner();tcpRenderAlias();SC='created';SA=true;sortBy('created');setTimeout(updCounter,300);setTimeout(updCounter,800);setTimeout(function(){
+function tcpSaveFilters(){
+    var f={
+        c:[...document.querySelectorAll('.fs-c:checked')].map(x=>x.value),
+        co:[...document.querySelectorAll('.fs-co:checked')].map(x=>x.value),
+        t:[...document.querySelectorAll('.fs-t:checked')].map(x=>x.value),
+        p:[...document.querySelectorAll('.fs-p:checked')].map(x=>x.value),
+        hl:document.getElementById('fs-hl')?.checked||false,
+        rt:document.getElementById('toggle-rt')?.checked!==false
+    };
+    localStorage.setItem('tcp_saved_filters',JSON.stringify(f));
+    var n=document.getElementById('fs-save-note');
+    if(n){n.textContent='Salvato';setTimeout(function(){n.textContent='';},2000);}
+}
+function tcpResetSavedFilters(){
+    localStorage.removeItem('tcp_saved_filters');
+    document.querySelectorAll('.fs-c,.fs-co,.fs-t,.fs-p').forEach(function(x){x.checked=false;});
+    var hl=document.getElementById('fs-hl');if(hl)hl.checked=false;
+    var rt=document.getElementById('toggle-rt');if(rt){rt.checked=true;tcpToggleRT();}
+    applyShowOnly();
+    var n=document.getElementById('fs-save-note');
+    if(n){n.textContent='Reset effettuato';setTimeout(function(){n.textContent='';},2000);}
+}
+function tcpRestoreSavedFilters(){
+    var raw=localStorage.getItem('tcp_saved_filters');if(!raw)return;
+    try{
+        var f=JSON.parse(raw);
+        document.querySelectorAll('.fs-c').forEach(function(x){x.checked=(f.c||[]).includes(x.value);});
+        document.querySelectorAll('.fs-co').forEach(function(x){x.checked=(f.co||[]).includes(x.value);});
+        document.querySelectorAll('.fs-t').forEach(function(x){x.checked=(f.t||[]).includes(x.value);});
+        document.querySelectorAll('.fs-p').forEach(function(x){x.checked=(f.p||[]).includes(x.value);});
+        var hl=document.getElementById('fs-hl');if(hl)hl.checked=f.hl||false;
+        var rt=document.getElementById('toggle-rt');
+        if(rt){rt.checked=f.rt!==false;tcpToggleRT();}
+        applyShowOnly();
+    }catch(e){}
+}
+document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlanner();tcpRenderAlias();SC='created';SA=true;sortBy('created');tcpRestoreSavedFilters();setTimeout(updCounter,300);setTimeout(updCounter,800);setTimeout(function(){
         tcpCheckCollegaSilent();
         var _ci=parseInt(localStorage.getItem('tcp_gist_check_interval')||'0');
         if(_ci>0)tcpStartAutoCheck(_ci);
@@ -3711,9 +3724,9 @@ document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlann
     <button class="tb" data-t="planner" onclick="showTab('planner')">📅 Planner</button>
     <button class="tb" data-t="tratte" onclick="showTab('tratte')">🗺️ Tratte</button>
     <button class="tb" data-t="tariffario" onclick="showTab('tariffario')">💰 Tariffario</button>
-    <button class="tb" data-t="report" onclick="showTab('report')" style="margin-left:auto;">&#128202; Report</button>
-    <button id="btn-undo" onclick="tcpUndo()" style="display:none;margin-left:auto;background:#e67e22;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px;font-weight:bold;flex-shrink:0;">↩ Annulla</button>
-</div>
+    <button class="tb" data-t="report" onclick="showTab('report')" style="margin-left:auto;">&#128202; Stats</button>
+    <button class="tb" data-t="syncreport" onclick="showTab('syncreport')">&#128260; Sync Report</button>
+  </div>
 
 <div id="t-viaggi" class="tc on" style="flex:1;flex-direction:column;overflow:hidden;min-height:0;">
     <div id="notif-banner"></div>
@@ -3745,6 +3758,10 @@ document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlann
         <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" class="fs-p" value="genova" onchange="applyShowOnly()"> GOA</label>
         &nbsp;|&nbsp;
         <label style="display:inline-flex;align-items:center;gap:3px;"><input type="checkbox" id="fs-hl" onchange="applyShowOnly()"> \u2605 Evidenziati</label>
+        &nbsp;|&nbsp;
+        <button onclick="tcpSaveFilters()" style="background:#002856;color:white;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px;font-weight:bold;" title="Salva filtri attivi come predefiniti">&#128190; Salva</button>
+        <button onclick="tcpResetSavedFilters()" style="background:#a93226;color:white;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px;" title="Cancella filtri salvati">&#128465; Reset</button>
+        <span id="fs-save-note" style="font-size:10px;color:#27ae60;"></span>
     </div>
     <div class="actions">
         <button id="btn-clear" onclick="clearAll()">✕ Svuota lista</button>
@@ -3756,6 +3773,7 @@ document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlann
         <input id="search-viaggi" type="text" placeholder="container, indirizzo, porto..." style="border:1px solid #aac4e0;border-radius:4px;padding:4px 10px;font-size:11px;width:260px;margin-left:8px;">
         <button onclick="tcpSearchViaggi(document.getElementById('search-viaggi').value)" style="background:#002856;color:white;border:none;border-radius:4px;padding:5px 10px;cursor:pointer;font-size:11px;">🔍 Cerca</button>
         <button onclick="document.getElementById('search-viaggi').value='';tcpSearchViaggi('');" style="background:#888;color:white;border:none;border-radius:4px;padding:5px 9px;cursor:pointer;font-size:11px;">✕ Pulisci</button>
+        <button id="btn-undo" onclick="tcpUndo()" style="background:#e67e22;color:white;border:none;border-radius:4px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:bold;" title="Annulla ultima operazione">↩ Annulla</button>
         <span id="visible-count" style="margin-left:auto;font-size:11px;color:#555;white-space:nowrap;font-weight:bold;"></span>
     </div>
     <div id="mt-scroll" style="overflow-y:auto;flex:1;min-height:0;">
@@ -3899,6 +3917,7 @@ document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlann
 </div>
 
 <div id="t-report" class="tc" style="flex:1;overflow-y:auto;padding:12px 16px;">${reportHtml}</div>
+<div id="t-syncreport" class="tc" style="flex:1;overflow-y:auto;padding:12px 16px;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;border-bottom:2px solid #bdf3fc;padding-bottom:8px;"><b style="color:#002856;font-size:13px;">&#128260; Sync Report</b><div style="display:flex;gap:8px;align-items:center;"><button onclick="tcpApplyMergePairsModal()" style="background:#1a65b8;color:white;border:none;border-radius:4px;padding:5px 16px;cursor:pointer;font-size:12px;font-weight:bold;">&#10003; Applica</button><button onclick="tcpCloseMergePairsModal()" style="background:#aaa;color:white;border:none;border-radius:4px;padding:5px 12px;cursor:pointer;font-size:12px;">Annulla</button></div></div><p id="sr-summary" style="font-size:11px;color:#555;margin-bottom:12px;"></p><div id="sr-conflicts"><p style="color:#aaa;text-align:center;padding:40px;font-size:13px;">Nessun sync in corso.</p></div></div>
 
 <script>
 (function(){
@@ -4227,18 +4246,7 @@ window.tcpApplicaMerge=function(){
   </div>
 </div>
 
-<!-- MODAL MERGE RIUTILIZZI -->
-<div id="merge-pairs-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10003;align-items:center;justify-content:center;">
-  <div style="background:white;border-radius:10px;padding:24px;width:640px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.3);">
-    <h3 style="margin:0 0 6px;color:#002856;font-size:14px;">&#8704; Merge Riutilizzi</h3>
-    <p id="mpm-summary" style="font-size:11px;color:#555;margin-bottom:14px;"></p>
-    <div id="mpm-conflicts" style="margin-bottom:14px;"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button onclick="tcpCloseMergePairsModal()" style="background:#aaa;color:white;border:none;border-radius:5px;padding:7px 16px;cursor:pointer;font-size:12px;">Annulla</button>
-      <button onclick="tcpApplyMergePairsModal()" style="background:#1a65b8;color:white;border:none;border-radius:5px;padding:7px 16px;cursor:pointer;font-size:12px;font-weight:bold;">&#10003; Applica</button>
-    </div>
-  </div>
-</div>
+
 
 </body></html>`;
 }
@@ -4341,7 +4349,9 @@ function tcpToggleAutoGist(mode) {
 
 function buildWidget() {
     if (document.getElementById('tcp-mon-widget')) return;
-    const state = ss.load();
+    let state = ss.load();
+    if(!state){state={autoGist:'syncpub'};ss.save(state);}
+    else if(!state.autoGist){state.autoGist='syncpub';ss.save(state);}
     const run = state?.running || false;
     const box = document.createElement('div');
     box.id = 'tcp-mon-widget';
