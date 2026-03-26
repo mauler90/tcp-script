@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      2.0
 // @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
@@ -1421,9 +1421,49 @@ function collect(intervalMin, carriers, containers) {
         if (pairsChanged) ls.savePairs(pairs);
     }
 
-    // newIds = solo quelli dentro la finestra temporale (usato per badge NEW e contatore)
+    // newIds = solo quelli dentro la finestra temporale
     const newIds = fresh.filter(o => o.isNew).map(o => o.id);
     const modIds = merged.filter(o => o.isModified).map(o => o.id);
+
+    // Controllo alert coppie abbinate
+    (function(){
+        var alerts = {};
+        try { alerts = JSON.parse(localStorage.getItem('tcp_pair_alerts') || '{}'); } catch(e) {}
+        var pairs = ls.pairs();
+        var fields = [
+            {k:'delivery', label:'Delivery'},
+            {k:'address',  label:'Indirizzo'},
+            {k:'port',     label:'Porto'},
+            {k:'carrier',  label:'Carrier'},
+            {k:'cont',     label:'Container'}
+        ];
+        pairs.forEach(function(p, idx) {
+            var key = String(idx);
+            var changes = [];
+            ['imp','exp'].forEach(function(side) {
+                var ref = p[side];
+                var live = merged.find(function(o){ return o.id === ref.id; });
+                if (!live) return;
+                fields.forEach(function(f) {
+                    if (live[f.k] !== undefined && ref[f.k] !== undefined && live[f.k] !== ref[f.k]) {
+                        changes.push(side.toUpperCase() + ' ' + f.label + ': ' + ref[f.k] + ' -> ' + live[f.k]);
+                    }
+                });
+            });
+            if (changes.length > 0) {
+                var existing = alerts[key];
+                var newTooltip = changes.join(' | ');
+                if (existing && existing.dismissed && existing.dismissedTooltip === newTooltip) {
+                } else if (!existing || existing.tooltip !== newTooltip) {
+                    alerts[key] = { tooltip: newTooltip, at: now.toISOString(), dismissed: false };
+                }
+            } else {
+                delete alerts[key];
+            }
+        });
+        localStorage.setItem('tcp_pair_alerts', JSON.stringify(alerts));
+    })();
+
     return { newCount: newIds.length, newIds, modIds };
 }
 
@@ -2027,8 +2067,12 @@ function updDim(){
         const compatCont=isI?compat(ref.cont,co):compat(co,ref.cont);
         const isMissing=r.style.opacity==='0.55'||r.style.opacity==='.55'||parseFloat(r.style.opacity||'1')<0.9;
         const ok=carr===ref.carrier&&compatCont&&compatDate&&!isMissing;
-        r.classList.toggle('dim',!ok);
-        r.style.display=ok?'':'none';
+        const activePorts=[...document.querySelectorAll('.fs-p:checked')].map(x=>x.value.toLowerCase());
+        const portTxt=(r.dataset.port||'').toLowerCase();
+        const okPort=!activePorts.length||activePorts.some(p=>portTxt.includes(p));
+        const finalOk=ok&&okPort;
+        r.classList.toggle('dim',!finalOk);
+        r.style.display=finalOk?'':'none';
     });
     // Riordina le righe visibili per data più vicina al riferimento
     const tbody=document.getElementById('tbody');if(tbody){
@@ -2394,8 +2438,15 @@ function buildPairsHtml(){
                 const pal=PAL[p.imp.carrier]||['#ddd'];
                 cc[p.imp.carrier]=(cc[p.imp.carrier]||0);
                 const bg=pal[cc[p.imp.carrier]++%pal.length];
-                return \`<div class="pr" id="pair-\${realIdx}" style="border-left:4px solid \${bg};background:\${bg}22;">
-                    <span class="tag imp">📥 IMP</span>
+                var _alerts={};
+                try{_alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
+                var _al=_alerts[String(realIdx)];
+                var _alTip=_al?_al.tooltip.split('"').join('&#34;').split(String.fromCharCode(10)).join(' | '):'';
+                var _alSpan='<span onclick="tcpDismissPairAlert('+realIdx+',event)" title="'+_alTip+'" style="cursor:pointer;background:#e67e22;color:white;border-radius:3px;padding:2px 7px;font-size:11px;font-weight:bold;margin-right:4px;">\u26a0\ufe0f Modificato \u2715</span>';
+                var _alBadge=(_al&&!_al.dismissed)?_alSpan:'';
+                var _alBorder=(_al&&!_al.dismissed)?'outline:2px solid #e67e22;':'';
+                return \`<div class="pr" id="pair-\${realIdx}" style="border-left:4px solid \${bg};background:\${bg}22;\${_alBorder}">
+                    \${_alBadge}<span class="tag imp">📥 IMP</span>
                     <span class="tag">\${p.imp.carrier}</span><span class="tag">\${p.imp.cont}</span>
                     <span class="f">\${p.imp.contNr||'—'}</span>
                     <span class="f"><b>\${p.imp.address}</b></span>
@@ -2664,6 +2715,13 @@ function rmPair(i){
             localStorage.setItem('tcp_stats',JSON.stringify(_dSt));
         }
     }
+    if(p){
+        var removed=[];
+        try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
+        var rKey=(p.imp.contNr||p.imp.id)+'|'+(p.exp.contNr||p.exp.id);
+        if(!removed.some(function(r){return(r.key||r)===rKey;}))removed.push({key:rKey,at:new Date().toISOString()});
+        localStorage.setItem('tcp_removed_pairs',JSON.stringify(removed));
+    }
     pairs.splice(i,1);sp(pairs);rPairs();rPlanner();
 }
 // -- GIST SETTINGS --
@@ -2707,7 +2765,11 @@ function tcpDoMerge(incoming){
     var existing=lp();
     var toAdd=[];var conflicts=[];var ignored=0;
     var t=function(s){return(s||'').trim();};
+    var removed=[];
+    try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
     incoming.forEach(function(inc){
+        var rKey=(t(inc.imp&&inc.imp.contNr)||t(inc.imp&&inc.imp.id))+'|'+(t(inc.exp&&inc.exp.contNr)||t(inc.exp&&inc.exp.id));
+        if(removed.some(function(r){return(r.key||r)===rKey;})){ignored++;return;}
         var iNr=t(inc.imp&&inc.imp.contNr);
         var eNr=t(inc.exp&&inc.exp.contNr);
         var found=null;var foundType=null;
@@ -2733,7 +2795,20 @@ function tcpDoMerge(incoming){
         }
         if(!found){toAdd.push(inc);}
         else if(foundType==='exact'){ignored++;}
-        else{conflicts.push({inc:inc,ex:found,type:foundType});}
+        else{
+            var _resolved=[];
+            try{_resolved=JSON.parse(localStorage.getItem('tcp_resolved_conflicts')||'[]');}catch(e){}
+            var _rKey=(found.imp.contNr||found.imp.id)+'|'+(found.exp.contNr||found.exp.id)
+                     +'||'+(inc.imp.contNr||inc.imp.id)+'|'+(inc.exp.contNr||inc.exp.id);
+            var _prevRes=_resolved.find(function(r){return r.key===_rKey;});
+            if(_prevRes&&_prevRes.choice==='theirs'){
+                conflicts.push({inc:inc,ex:found,type:foundType,autoChoice:'theirs'});
+            }else if(_prevRes){
+                ignored++;
+            }else{
+                conflicts.push({inc:inc,ex:found,type:foundType});
+            }
+        }
     });
     return{toAdd:toAdd,conflicts:conflicts,ignored:ignored};
 }
@@ -2741,12 +2816,21 @@ function tcpApplyMergePairs(toAdd,conflictResolutions){
     _pushUndo();
     var pairs=lp();
     toAdd.forEach(function(p){pairs.push(p);});
+    var resolved=[];
+    try{resolved=JSON.parse(localStorage.getItem('tcp_resolved_conflicts')||'[]');}catch(e){}
     conflictResolutions.forEach(function(res){
+        if(res.choice==='skip')return;
+        var rKey=(res.ex.imp.contNr||res.ex.imp.id)+'|'+(res.ex.exp.contNr||res.ex.exp.id)
+                +'||'+(res.inc.imp.contNr||res.inc.imp.id)+'|'+(res.inc.exp.contNr||res.inc.exp.id);
+        var existing=resolved.find(function(r){return r.key===rKey;});
+        if(existing){existing.choice=res.choice;}
+        else{resolved.push({key:rKey,choice:res.choice,at:new Date().toISOString()});}
         if(res.choice==='theirs'){
             var idx=pairs.findIndex(function(p){return p===res.ex;});
             if(idx>=0)pairs[idx]=res.inc;
         }
     });
+    localStorage.setItem('tcp_resolved_conflicts',JSON.stringify(resolved));
     sp(pairs);rPairs();rPlanner();
 }
 // -- IMPORT RIUTILIZZI DA FILE --
@@ -2916,14 +3000,29 @@ function tcpShowSyncModal(payload){
         if((pD.conflicts||[]).length){
             html+='<div style="font-weight:bold;color:#002856;font-size:12px;margin:8px 0 4px;">Riutilizzi</div>';
             html+=(pD.conflicts||[]).map(function(cf,ci){
-                var _f=cf.type==='conflict-exp'?'Nr.EXP diverso':'Nr.IMP diverso';
-                return '<div style="border:1px solid #d0dff0;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;">'
-                    +'<div style="font-weight:bold;color:#002856;margin-bottom:4px;">'+_f+'</div>'
-                    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">'
-                    +'<div style="background:#f0f4fa;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">MIO</div>'
-                    +'<div>'+cf.ex.imp.carrier+' '+cf.ex.imp.cont+'</div><div>'+cf.ex.imp.address+'</div></div>'
-                    +'<div style="background:#f0f8f0;border-radius:4px;padding:5px 8px;"><div style="font-size:10px;color:#888;font-weight:bold;">COLLEGA</div>'
-                    +'<div>'+cf.inc.imp.carrier+' '+cf.inc.imp.cont+'</div><div>'+cf.inc.imp.address+'</div></div></div>'
+                var _diffField=cf.type==='conflict-exp'?'contNr_exp':'contNr_imp';
+                var _label=cf.type==='conflict-exp'?'Nr. Container EXP diverso':'Nr. Container IMP diverso';
+                function _hl(val,isDiff){return isDiff?('<b style="background:#fff3cd;border-radius:3px;padding:1px 4px;">'+val+'</b>'):val;}
+                var _isExpConfl=cf.type==='conflict-exp';
+                function _pairHtml(p){
+                    return '<div style="font-size:11px;line-height:1.8;">'
+                        +'<div><b>IMP:</b> '+p.imp.carrier+' '+p.imp.cont
+                            +' &nbsp;<span style="color:#555;">Nr:</span> '+_hl(p.imp.contNr||'\u2014',!_isExpConfl)
+                            +' &nbsp;<span style="color:#555;">del</span> '+p.imp.delivery+'</div>'
+                        +'<div style="color:#555;font-size:11px;padding-left:8px;">'+p.imp.address+' &nbsp;|&nbsp; '+p.imp.port+'</div>'
+                        +'<div style="color:#aaa;font-size:10px;text-align:center;padding:2px 0;">\u2195</div>'
+                        +'<div><b>EXP:</b> '+p.exp.carrier+' '+p.exp.cont
+                            +' &nbsp;<span style="color:#555;">Nr:</span> '+_hl(p.exp.contNr||'\u2014',_isExpConfl)
+                            +' &nbsp;<span style="color:#555;">del</span> '+p.exp.delivery+'</div>'
+                        +'<div style="color:#555;font-size:11px;padding-left:8px;">'+p.exp.address+' &nbsp;|&nbsp; '+p.exp.port+'</div>'
+                        +'</div>';
+                }
+                return '<div style="border:1px solid #f0c040;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;">'
+                    +'<div style="font-weight:bold;color:#e67e22;margin-bottom:8px;font-size:12px;">\u26a0\ufe0f '+_label+'</div>'
+                    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'
+                    +'<div style="background:#f0f4fa;border-radius:4px;padding:8px;"><div style="font-size:10px;color:#1a65b8;font-weight:bold;margin-bottom:4px;">MIO</div>'+_pairHtml(cf.ex)+'</div>'
+                    +'<div style="background:#f0f8f0;border-radius:4px;padding:8px;"><div style="font-size:10px;color:#27ae60;font-weight:bold;margin-bottom:4px;">COLLEGA</div>'+_pairHtml(cf.inc)+'</div>'
+                    +'</div>'
                     +'<div style="display:flex;gap:6px;">'
                     +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #1a65b8;font-size:11px;"><input type="radio" name="mpc'+ci+'" value="mine" checked> <span style="color:#1a65b8;font-weight:bold;">Il mio</span></label>'
                     +'<label style="display:flex;align-items:center;gap:3px;cursor:pointer;padding:3px 8px;border-radius:4px;border:2px solid #27ae60;font-size:11px;"><input type="radio" name="mpc'+ci+'" value="theirs"> <span style="color:#27ae60;font-weight:bold;">Collega</span></label>'
@@ -2971,6 +3070,7 @@ function tcpApplyMergePairsModal(){
     var rD=_mergePayload.tariffario||{toAdd:[],conflicts:[]};
     // Pairs
     var pRes=(pD.conflicts||[]).map(function(cf,ci){
+        if(cf.autoChoice)return{ex:cf.ex,inc:cf.inc,choice:cf.autoChoice};
         var sel=document.querySelector('input[name="mpc'+ci+'"]:checked');
         return{ex:cf.ex,inc:cf.inc,choice:sel?sel.value:'mine'};
     });
@@ -3023,6 +3123,41 @@ function cleanExpired(){
         return true;
     });
     so(orders);
+    // Pulizia resolved conflicts (10gg)
+    (function(){
+        var resolved=[];
+        try{resolved=JSON.parse(localStorage.getItem('tcp_resolved_conflicts')||'[]');}catch(e){}
+        var h10d=10*24*60*60*1000;
+        resolved=resolved.filter(function(r){
+            return !r.at||(Date.now()-new Date(r.at).getTime())<h10d;
+        });
+        localStorage.setItem('tcp_resolved_conflicts',JSON.stringify(resolved));
+    })();
+    // Pulizia removed_pairs (14gg)
+    (function(){
+        var removed=[];
+        try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
+        var h14d=14*24*60*60*1000;
+        removed=removed.filter(function(r){
+            if(typeof r==='string')return true; // retrocompatibilità
+            return !r.at||(Date.now()-new Date(r.at).getTime())<h14d;
+        });
+        localStorage.setItem('tcp_removed_pairs',JSON.stringify(removed));
+    })();
+    // Pulizia alerts scaduti (7gg dopo exp.delivery)
+    (function(){
+        var alerts={};
+        try{alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
+        var pairs=ls.pairs();
+        var h7d=7*24*60*60*1000;
+        Object.keys(alerts).forEach(function(key){
+            var p=pairs[parseInt(key)];
+            if(!p){delete alerts[key];return;}
+            var de=pd(p.exp.delivery);
+            if(de&&(Date.now()-de.getTime())>h7d)delete alerts[key];
+        });
+        localStorage.setItem('tcp_pair_alerts',JSON.stringify(alerts));
+    })();
 }
 
 // ── PLANNER render ──
@@ -3212,11 +3347,12 @@ function applyShowOnly(){
     const traffics=[...document.querySelectorAll('.fs-t:checked')].map(x=>x.value.toLowerCase());
     const ports=[...document.querySelectorAll('.fs-p:checked')].map(x=>x.value.toLowerCase());
     const onlyHl=document.getElementById('fs-hl')?.checked||false;
+    const rtChecked=document.getElementById('toggle-rt')?.checked!==false;
     const orders=lo();
     const rows=[...document.querySelectorAll('#tbody tr[data-id]')];
     rows.forEach(r=>{
         const noFilter=!carriers.length&&!conts.length&&!traffics.length&&!ports.length&&!onlyHl;
-        if(noFilter){r.style.display='';return;}
+        if(noFilter){r.style.display=rtChecked||r.dataset.rt!=='1'?'':'none';return;}
         const c=r.dataset.carrier||'';
         const co=r.dataset.cont||'';
         const t=(r.dataset.traffic||'').toLowerCase();
@@ -3226,7 +3362,8 @@ function applyShowOnly(){
         const okT=!traffics.length||traffics.includes(t);
         const okP=!ports.length||ports.some(p=>portTxt.includes(p));
         const okHl=!onlyHl||orders.find(function(o){return o.id===r.dataset.id&&o.highlighted;});
-        r.style.display=(okC&&okCo&&okT&&okP&&okHl)?'':'none';
+        const okRT=rtChecked||r.dataset.rt!=='1';
+        r.style.display=(okC&&okCo&&okT&&okP&&okHl&&okRT)?'':'none';
     });
     if(typeof updCounter==='function')updCounter();
 }
@@ -3669,6 +3806,17 @@ function tcpToast(msg,duration){
     clearTimeout(t._timer);
     t._timer=setTimeout(function(){t.style.opacity='0';},duration||4000);
 }
+function tcpDismissPairAlert(idx,ev){
+    if(ev){ev.stopPropagation();ev.preventDefault();}
+    var alerts={};
+    try{alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
+    if(alerts[idx]){
+        alerts[idx].dismissed=true;
+        alerts[idx].dismissedTooltip=alerts[idx].tooltip;
+    }
+    localStorage.setItem('tcp_pair_alerts',JSON.stringify(alerts));
+    rPairs();
+}
 function tcpSaveFilters(){
     var f={
         c:[...document.querySelectorAll('.fs-c:checked')].map(x=>x.value),
@@ -3700,9 +3848,9 @@ function tcpRestoreSavedFilters(){
         document.querySelectorAll('.fs-t').forEach(function(x){x.checked=(f.t||[]).includes(x.value);});
         document.querySelectorAll('.fs-p').forEach(function(x){x.checked=(f.p||[]).includes(x.value);});
         var hl=document.getElementById('fs-hl');if(hl)hl.checked=f.hl||false;
+        applyShowOnly();
         var rt=document.getElementById('toggle-rt');
         if(rt){rt.checked=f.rt!==false;tcpToggleRT();}
-        applyShowOnly();
     }catch(e){}
 }
 document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlanner();tcpRenderAlias();SC='created';SA=true;sortBy('created');tcpRestoreSavedFilters();setTimeout(updCounter,300);setTimeout(updCounter,800);setTimeout(function(){
@@ -4270,6 +4418,15 @@ function openOrUpdate(settings, lastUpdate, newCount, newIds, modIds) {
     win.document.close();
     // Forza layout flex su #t-viaggi dopo rebuild
     try{ win.showTab('viaggi'); }catch(e){}
+    setTimeout(function(){ try{ win.tcpRestoreSavedFilters(); }catch(e){} }, 300);
+    // Toast se ci sono nuovi alert coppie
+    try{
+        var _alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');
+        var _nAlert=Object.values(_alerts).filter(function(a){return !a.dismissed;}).length;
+        if(_nAlert>0&&win&&!win.closed&&win.tcpToast){
+            win.tcpToast('\u26a0\ufe0f '+_nAlert+' riutilizz'+(parseInt(_nAlert)===1?'o':'i')+' con dati modificati',6000);
+        }
+    }catch(e){}
 }
 
 // ────────────────────────────────────────────────
