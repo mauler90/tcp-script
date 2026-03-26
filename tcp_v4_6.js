@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      1.2
 // @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
@@ -2067,12 +2067,8 @@ function updDim(){
         const compatCont=isI?compat(ref.cont,co):compat(co,ref.cont);
         const isMissing=r.style.opacity==='0.55'||r.style.opacity==='.55'||parseFloat(r.style.opacity||'1')<0.9;
         const ok=carr===ref.carrier&&compatCont&&compatDate&&!isMissing;
-        const activePorts=[...document.querySelectorAll('.fs-p:checked')].map(x=>x.value.toLowerCase());
-        const portTxt=(r.dataset.port||'').toLowerCase();
-        const okPort=!activePorts.length||activePorts.some(p=>portTxt.includes(p));
-        const finalOk=ok&&okPort;
-        r.classList.toggle('dim',!finalOk);
-        r.style.display=finalOk?'':'none';
+        r.classList.toggle('dim',!ok);
+        r.style.display=ok?'':'none';
     });
     // Riordina le righe visibili per data più vicina al riferimento
     const tbody=document.getElementById('tbody');if(tbody){
@@ -2205,82 +2201,6 @@ function doDeselect(){
 
 function tcpMaskDate(el){var v=el.value.replace(/[^0-9]/g,'');if(v.length>2)v=v.slice(0,2)+'/'+v.slice(2);if(v.length>5)v=v.slice(0,5)+'/'+v.slice(5,7);el.value=v;}
 function tcpMaskTime(el){var v=el.value.replace(/[^0-9]/g,'');if(v.length>2)v=v.slice(0,2)+':'+v.slice(2,4);el.value=v;}
-// ── MULTI-STOP ADDRESS HELPERS ──
-function tcpMakeStopRow(cid){
-    var row=document.createElement('div');
-    row.className='addr-stop';
-    row.style.cssText='display:grid;grid-template-columns:1fr 52px 70px 28px;gap:5px;align-items:end;margin-bottom:5px;';
-    var cityDiv=document.createElement('div');
-    var cityLbl=document.createElement('div');cityLbl.style.cssText='font-size:10px;color:#888;margin-bottom:2px;';cityLbl.textContent='Citt\u00e0';
-    var cityInp=document.createElement('input');cityInp.className='stop-city';cityInp.placeholder='es. Firenze';cityInp.style.cssText='width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;';
-    cityDiv.appendChild(cityLbl);cityDiv.appendChild(cityInp);
-    var provDiv=document.createElement('div');
-    var provLbl=document.createElement('div');provLbl.style.cssText='font-size:10px;color:#888;margin-bottom:2px;';provLbl.textContent='Prov.';
-    var provInp=document.createElement('input');provInp.className='stop-prov';provInp.maxLength=2;provInp.placeholder='FI';provInp.style.cssText='width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;text-align:center;';
-    provInp.addEventListener('input',function(){this.value=this.value.toUpperCase();});
-    provDiv.appendChild(provLbl);provDiv.appendChild(provInp);
-    var capDiv=document.createElement('div');
-    var capLbl=document.createElement('div');capLbl.style.cssText='font-size:10px;color:#888;margin-bottom:2px;';capLbl.textContent='CAP';
-    var capInp=document.createElement('input');capInp.className='stop-cap';capInp.maxLength=5;capInp.placeholder='50100';capInp.style.cssText='width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;';
-    capDiv.appendChild(capLbl);capDiv.appendChild(capInp);
-    var rmBtn=document.createElement('button');rmBtn.type='button';rmBtn.className='stop-remove';rmBtn.textContent='\u2715';
-    rmBtn.style.cssText='background:#a93226;color:white;border:none;border-radius:4px;padding:5px 7px;cursor:pointer;font-size:12px;display:none;align-self:end;';
-    rmBtn.addEventListener('click',function(){tcpRemoveStop(this,cid);});
-    row.appendChild(cityDiv);row.appendChild(provDiv);row.appendChild(capDiv);row.appendChild(rmBtn);
-    return row;
-}
-function tcpUpdateRemoveBtns(cid){
-    var c=document.getElementById(cid);if(!c)return;
-    var rows=c.querySelectorAll('.addr-stop');
-    rows.forEach(function(r){var btn=r.querySelector('.stop-remove');if(btn)btn.style.display=rows.length>1?'block':'none';});
-}
-function tcpAddStop(cid){
-    var c=document.getElementById(cid);if(!c)return;
-    c.appendChild(tcpMakeStopRow(cid));
-    tcpUpdateRemoveBtns(cid);
-}
-function tcpRemoveStop(btn,cid){
-    var row=btn.closest('.addr-stop');if(!row)return;
-    row.remove();
-    tcpUpdateRemoveBtns(cid);
-}
-function tcpBuildAddress(cid){
-    var c=document.getElementById(cid);if(!c)return'';
-    var parts=[];
-    c.querySelectorAll('.addr-stop').forEach(function(row){
-        var city=(row.querySelector('.stop-city')?.value||'').trim();
-        var prov=(row.querySelector('.stop-prov')?.value||'').trim().toUpperCase();
-        var cap=(row.querySelector('.stop-cap')?.value||'').trim();
-        if(!city)return;
-        var s=city;
-        if(prov)s+=' ('+prov+')';
-        if(cap)s+=' '+cap;
-        parts.push(s);
-    });
-    return parts.join(' + ');
-}
-function tcpParseAddress(address,cid){
-    var c=document.getElementById(cid);if(!c)return;
-    c.innerHTML='';
-    var stops=(address||'').split(' + ');
-    if(!stops.length||!stops[0].trim())stops=[''];
-    stops.forEach(function(stop){
-        var row=tcpMakeStopRow(cid);
-        var m=stop.trim().match(/^(.*?)\s*\(([A-Z]{2})\)\s*(\d{5})?/);
-        var cityInp=row.querySelector('.stop-city');
-        var provInp=row.querySelector('.stop-prov');
-        var capInp=row.querySelector('.stop-cap');
-        if(m){
-            if(cityInp)cityInp.value=m[1].trim();
-            if(provInp)provInp.value=m[2];
-            if(capInp&&m[3])capInp.value=m[3];
-        }else{
-            if(cityInp)cityInp.value=stop.trim();
-        }
-        c.appendChild(row);
-    });
-    tcpUpdateRemoveBtns(cid);
-}
 // ── REFRESH TABELLA ──
 function tcpRefresh(){
     const orders=lo();
@@ -2329,7 +2249,7 @@ function doEdit(id){
     document.getElementById('edit-cont').value=o.cont||'';
     document.getElementById('edit-port').value=o.port||'';
     document.getElementById('edit-delivery').value=o.delivery||'';
-    tcpParseAddress(o.address||'','edit-stops-container');
+    document.getElementById('edit-address').value=o.address||'';
     document.getElementById('edit-branch').value=o.branch||'';
     document.getElementById('edit-contNr').value=o.contNr||'';
     m.style.display='flex';
@@ -2342,8 +2262,7 @@ function saveEdit(){
     o.cont=document.getElementById('edit-cont').value.trim()||o.cont;
     o.port=document.getElementById('edit-port').value.trim()||o.port;
     o.delivery=document.getElementById('edit-delivery').value.trim()||o.delivery;
-    const _editAddr=tcpBuildAddress('edit-stops-container');
-    o.address=_editAddr||o.address;
+    o.address=document.getElementById('edit-address').value.trim()||o.address;
     o.branch=document.getElementById('edit-branch').value.trim();
     const newContNr=document.getElementById('edit-contNr').value.trim();
     if(newContNr)o.contNr=newContNr.toUpperCase();
@@ -2382,10 +2301,10 @@ function openAddManual(){
     document.getElementById('add-port').value='La Spezia - IT';
     document.getElementById('add-delivery-date').value='';
     document.getElementById('add-delivery-time').value='';
+    document.getElementById('add-address').value='';
     document.getElementById('add-contNr').value='';
     document.getElementById('add-branch').value='';
-    var sc=document.getElementById('add-stops-container');
-    if(sc){sc.innerHTML='';sc.appendChild(tcpMakeStopRow('add-stops-container'));}
+    document.getElementById('add-prov').value='';
     m.style.display='flex';
 }
 function saveAddManual(){
@@ -2396,7 +2315,9 @@ function saveAddManual(){
     const delivDate=document.getElementById('add-delivery-date').value.trim();
     const delivTime=document.getElementById('add-delivery-time').value.trim();
     const delivery=delivDate&&delivTime?delivDate+', '+delivTime:delivDate||delivTime;
-    const address=tcpBuildAddress('add-stops-container');
+    const addrRaw=document.getElementById('add-address').value.trim();
+    const prov=document.getElementById('add-prov').value.trim().toUpperCase();
+    const address=addrRaw+(prov?' ('+prov+')':'');
     const contNr=document.getElementById('add-contNr').value.trim();
     const branch=document.getElementById('add-branch').value.trim();
     if(!carrier||!delivery||!address){alert('Carrier, Delivery e Indirizzo sono obbligatori.');return;}
@@ -2794,7 +2715,7 @@ function rmPair(i){
         var removed=[];
         try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
         var rKey=(p.imp.contNr||p.imp.id)+'|'+(p.exp.contNr||p.exp.id);
-        if(!removed.some(function(r){return(r.key||r)===rKey;}))removed.push({key:rKey,at:new Date().toISOString()});
+        if(!removed.includes(rKey))removed.push(rKey);
         localStorage.setItem('tcp_removed_pairs',JSON.stringify(removed));
     }
     pairs.splice(i,1);sp(pairs);rPairs();rPlanner();
@@ -2844,7 +2765,7 @@ function tcpDoMerge(incoming){
     try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
     incoming.forEach(function(inc){
         var rKey=(t(inc.imp&&inc.imp.contNr)||t(inc.imp&&inc.imp.id))+'|'+(t(inc.exp&&inc.exp.contNr)||t(inc.exp&&inc.exp.id));
-        if(removed.some(function(r){return(r.key||r)===rKey;})){ignored++;return;}
+        if(removed.includes(rKey)){ignored++;return;}
         var iNr=t(inc.imp&&inc.imp.contNr);
         var eNr=t(inc.exp&&inc.exp.contNr);
         var found=null;var foundType=null;
@@ -3198,26 +3119,15 @@ function cleanExpired(){
         return true;
     });
     so(orders);
-    // Pulizia resolved conflicts (10gg)
+    // Pulizia resolved conflicts (30gg)
     (function(){
         var resolved=[];
         try{resolved=JSON.parse(localStorage.getItem('tcp_resolved_conflicts')||'[]');}catch(e){}
-        var h10d=10*24*60*60*1000;
+        var h30d=30*24*60*60*1000;
         resolved=resolved.filter(function(r){
-            return !r.at||(Date.now()-new Date(r.at).getTime())<h10d;
+            return !r.at||(Date.now()-new Date(r.at).getTime())<h30d;
         });
         localStorage.setItem('tcp_resolved_conflicts',JSON.stringify(resolved));
-    })();
-    // Pulizia removed_pairs (14gg)
-    (function(){
-        var removed=[];
-        try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
-        var h14d=14*24*60*60*1000;
-        removed=removed.filter(function(r){
-            if(typeof r==='string')return true; // retrocompatibilità
-            return !r.at||(Date.now()-new Date(r.at).getTime())<h14d;
-        });
-        localStorage.setItem('tcp_removed_pairs',JSON.stringify(removed));
     })();
     // Pulizia alerts scaduti (7gg dopo exp.delivery)
     (function(){
@@ -3422,12 +3332,11 @@ function applyShowOnly(){
     const traffics=[...document.querySelectorAll('.fs-t:checked')].map(x=>x.value.toLowerCase());
     const ports=[...document.querySelectorAll('.fs-p:checked')].map(x=>x.value.toLowerCase());
     const onlyHl=document.getElementById('fs-hl')?.checked||false;
-    const rtChecked=document.getElementById('toggle-rt')?.checked!==false;
     const orders=lo();
     const rows=[...document.querySelectorAll('#tbody tr[data-id]')];
     rows.forEach(r=>{
         const noFilter=!carriers.length&&!conts.length&&!traffics.length&&!ports.length&&!onlyHl;
-        if(noFilter){r.style.display=rtChecked||r.dataset.rt!=='1'?'':'none';return;}
+        if(noFilter){r.style.display='';return;}
         const c=r.dataset.carrier||'';
         const co=r.dataset.cont||'';
         const t=(r.dataset.traffic||'').toLowerCase();
@@ -3437,8 +3346,7 @@ function applyShowOnly(){
         const okT=!traffics.length||traffics.includes(t);
         const okP=!ports.length||ports.some(p=>portTxt.includes(p));
         const okHl=!onlyHl||orders.find(function(o){return o.id===r.dataset.id&&o.highlighted;});
-        const okRT=rtChecked||r.dataset.rt!=='1';
-        r.style.display=(okC&&okCo&&okT&&okP&&okHl&&okRT)?'':'none';
+        r.style.display=(okC&&okCo&&okT&&okP&&okHl)?'':'none';
     });
     if(typeof updCounter==='function')updCounter();
 }
@@ -3923,9 +3831,9 @@ function tcpRestoreSavedFilters(){
         document.querySelectorAll('.fs-t').forEach(function(x){x.checked=(f.t||[]).includes(x.value);});
         document.querySelectorAll('.fs-p').forEach(function(x){x.checked=(f.p||[]).includes(x.value);});
         var hl=document.getElementById('fs-hl');if(hl)hl.checked=f.hl||false;
-        applyShowOnly();
         var rt=document.getElementById('toggle-rt');
         if(rt){rt.checked=f.rt!==false;tcpToggleRT();}
+        applyShowOnly();
     }catch(e){}
 }
 document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlanner();tcpRenderAlias();SC='created';SA=true;sortBy('created');tcpRestoreSavedFilters();setTimeout(updCounter,300);setTimeout(updCounter,800);setTimeout(function(){
@@ -4331,9 +4239,8 @@ window.tcpApplicaMerge=function(){
         <input id="edit-port" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"></label>
       <label style="font-size:11px;color:#555;">Delivery<br>
         <input id="edit-delivery" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"></label>
-      <div style="font-size:11px;color:#555;margin-bottom:3px;">Indirizzo</div>
-      <div id="edit-stops-container" style="margin-bottom:4px;"></div>
-      <button type="button" onclick="tcpAddStop('edit-stops-container')" style="background:#5b7fa6;color:white;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px;margin-bottom:6px;">+ Stop</button>
+      <label style="font-size:11px;color:#555;">Indirizzo<br>
+        <input id="edit-address" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"></label>
       <label style="font-size:11px;color:#555;">Branch (filiale)<br>
         <input id="edit-branch" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"></label>
       <label style="font-size:11px;color:#555;">Nr. Container<br>
@@ -4404,9 +4311,14 @@ window.tcpApplicaMerge=function(){
         <label style="font-size:11px;color:#555;">Orario *<br>
           <input id="add-delivery-time" placeholder="hh:mm" maxlength="5" oninput="tcpMaskTime(this)" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"></label>
       </div>
-      <div style="font-size:11px;color:#555;margin-bottom:3px;">Indirizzo * <span style="font-size:10px;color:#888;">(citt&agrave;, prov., CAP)</span></div>
-      <div id="add-stops-container"></div>
-      <button type="button" onclick="tcpAddStop('add-stops-container')" style="background:#5b7fa6;color:white;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px;margin-bottom:6px;">+ Stop</button>
+      <label style="font-size:11px;color:#555;">Indirizzo * (Città CAP)<br>
+      <div style="display:grid;grid-template-columns:1fr 56px;gap:6px;align-items:end;">
+        <input id="add-address" placeholder="es. Firenze 50100" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;">
+        <div>
+          <div style="font-size:10px;color:#888;margin-bottom:2px;">Prov.</div>
+          <input id="add-prov" placeholder="FI" maxlength="2" oninput="this.value=this.value.toUpperCase()" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;text-align:center;">
+        </div>
+      </div></label>
       <label style="font-size:11px;color:#555;">Nr. Container<br>
         <input id="add-contNr" placeholder="es. TCKU1234567" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;box-sizing:border-box;"></label>
       <label style="font-size:11px;color:#555;">Branch (filiale)<br>
@@ -4489,7 +4401,6 @@ function openOrUpdate(settings, lastUpdate, newCount, newIds, modIds) {
     win.document.close();
     // Forza layout flex su #t-viaggi dopo rebuild
     try{ win.showTab('viaggi'); }catch(e){}
-    setTimeout(function(){ try{ win.tcpRestoreSavedFilters(); }catch(e){} }, 300);
     // Toast se ci sono nuovi alert coppie
     try{
         var _alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');
