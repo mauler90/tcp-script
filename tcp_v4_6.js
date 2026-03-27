@@ -1331,7 +1331,7 @@ function collect(intervalMin, carriers, containers) {
             if (traffic.toLowerCase() === 'export' && /livorno/i.test(portLoadE) && addressParts.length === 1 && /livorno/i.test(addressAll) && (/savino.*livorno/i.test(addressAll) || /savino.*livorno/i.test(branch) || /savino.*livorno/i.test(place))) return;
             const contNr   = cr.querySelector('td:nth-child(3)')?.innerText.trim() || '';
             const id       = contNr || (traffic + created + rawCarrier);
-            const _exO = existing.find(x => x.id === id);
+            const _exO = existing.find(x => x.id === id && x.traffic.toLowerCase() === traffic.toLowerCase());
             if (_exO) {
                 const _dlvN     = cr.querySelector('td:nth-child(6)')?.innerText.trim() || '';
                 const _plN      = cr.querySelector('td:nth-child(7)')?.innerText.replace(/\[[^\]]+\]\s*/g,'').trim() || '';
@@ -1438,16 +1438,13 @@ function collect(intervalMin, carriers, containers) {
             {k:'cont',     label:'Container'}
         ];
         pairs.forEach(function(p, idx) {
-            var key = String(idx);
+            var key = ((p.imp&&p.imp.contNr)||(p.imp&&p.imp.id)||'')+'|'+((p.exp&&p.exp.contNr)||(p.exp&&p.exp.id)||'');
             var changes = [];
             ['imp','exp'].forEach(function(side) {
                 var ref = p[side];
                 var live = merged.find(function(o){ return o.id === ref.id; });
                 if (!live) return;
                 fields.forEach(function(f) {
-                    // contNr non monitorato sull'export: il nr del container IMP
-                    // viene spesso assegnato anche all'EXP nel riutilizzo, creando falsi alert
-                    if (f.k === 'cont' && side === 'exp') return;
                     if (live[f.k] !== undefined && ref[f.k] !== undefined && live[f.k] !== ref[f.k]) {
                         changes.push(side.toUpperCase() + ' ' + f.label + ': ' + ref[f.k] + ' -> ' + live[f.k]);
                     }
@@ -1701,6 +1698,7 @@ function buildReportHtml(pairs, orders) {
 }
 function buildHTML(orders, settings, lastUpdate, newCount, newIds, modIds) {
     const pid  = pairedIds();
+    function _ha(s){return (s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/`/g,"&#96;").replace(/\$\{/g,"&#36;{");}
     const nset = new Set(newIds);
     const mset = new Set(modIds || []);
     const pairs = ls.pairs();
@@ -1731,13 +1729,13 @@ function buildHTML(orders, settings, lastUpdate, newCount, newIds, modIds) {
             const missingBadge = o.missing ? ' <span style="background:#888;color:white;border-radius:3px;padding:1px 5px;font-size:8px;vertical-align:middle;white-space:nowrap;">non presente</span>' : '';
             const rtIcon   = o.reqTruck ? `<span style="color:#c0392b;font-weight:bold;font-size:13px;" title="${o.reqTruck}">✕</span>` : '';
             const hlBg     = o.highlighted ? '#f0a500' : '#002856';
-            const pallino  = (o.reqTruck || o.ldv) ? `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#e74c3c;margin:0 4px;vertical-align:middle;" title="${o.reqTruck?'RT: '+o.reqTruck+' ':''}${o.ldv?'LDV emessa ':''}${o.adr?'ADR: '+o.adr:''}"></span>` : '';
+            const pallino  = (o.reqTruck || o.ldv) ? `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#e74c3c;margin:0 4px;vertical-align:middle;" title="${o.reqTruck?'RT: '+_ha(o.reqTruck)+' ':''}${o.ldv?'LDV emessa ':''}${o.adr?'ADR: '+o.adr:''}"></span>` : '';
             const ldvCell  = o.ldv ? '<span style="color:#c0392b;font-weight:bold;font-size:10px;">LDV Emessa</span>' : '';
             const adrIcon  = o.adr ? '<span title="Merce pericolosa" style="cursor:default;">⚠️</span>' : '';
-            const placeIcon = o.place ? '<span style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;background:#999;color:white;font-size:8px;font-weight:bold;cursor:help;margin-left:4px;flex-shrink:0;" title="' + o.place.replace(/"/g,"'") + '">?</span>' : '';
+            const placeIcon = o.place ? '<span style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;background:#999;color:white;font-size:8px;font-weight:bold;cursor:help;margin-left:4px;flex-shrink:0;" title="' + o.place.replace(/"/g,"'").replace(/`/g,"&#96;").replace(/\${/g,"&#36;{") + '">?</span>' : '';
             return `<tr id="row-${sid}" style="${rowBg}${isNew?'outline:2px solid #e74c3c;':isMod?'outline:2px solid #f0a500;':''}"
                 data-id="${o.id}" data-traffic="${o.traffic}" data-carrier="${o.carrier}"
-                data-cont="${o.cont}" data-delivery="${o.delivery}" data-paired="${isPaired}" data-rt="${o.reqTruck?'1':'0'}" data-port="${(o.port||'').toLowerCase()}" data-address="${o.address}">
+                data-cont="${o.cont}" data-delivery="${o.delivery}" data-paired="${isPaired}" data-rt="${o.reqTruck?'1':'0'}" data-port="${(o.port||'').toLowerCase()}" data-address="${_ha(o.address)}">
                 <td style="text-align:center;padding:4px;">
                     <input type="checkbox" id="chk-${sid}"
                         onchange="handleCheck('${o.id}','${o.traffic}')"
@@ -2518,9 +2516,10 @@ function buildPairsHtml(){
                 const bg=pal[cc[p.imp.carrier]++%pal.length];
                 var _alerts={};
                 try{_alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
-                var _al=_alerts[String(realIdx)];
+                var _stableKey=((p.imp&&p.imp.contNr)||(p.imp&&p.imp.id)||'')+'|'+((p.exp&&p.exp.contNr)||(p.exp&&p.exp.id)||'');
+                var _al=_alerts[_stableKey];
                 var _alTip=_al?_al.tooltip.split('"').join('&#34;').split(String.fromCharCode(10)).join(' | '):'';
-                var _alSpan='<span onclick="tcpDismissPairAlert('+realIdx+',event)" title="'+_alTip+'" style="cursor:pointer;background:#e67e22;color:white;border-radius:3px;padding:2px 7px;font-size:11px;font-weight:bold;margin-right:4px;">\u26a0\ufe0f Modificato \u2715</span>';
+                var _alSpan='<span data-k="'+_stableKey+'" onclick="tcpDismissPairAlert(this,event)" title="'+_alTip+'" style="cursor:pointer;background:#e67e22;color:white;border-radius:3px;padding:2px 7px;font-size:11px;font-weight:bold;margin-right:4px;">\u26a0\ufe0f Modificato \u2715</span>';
                 var _alBadge=(_al&&!_al.dismissed)?_alSpan:'';
                 var _alBorder=(_al&&!_al.dismissed)?'outline:2px solid #e67e22;':'';
                 return \`<div class="pr" id="pair-\${realIdx}" style="border-left:4px solid \${bg};background:\${bg}22;\${_alBorder}">
@@ -2904,7 +2903,17 @@ function tcpApplyMergePairs(toAdd,conflictResolutions){
         if(existing){existing.choice=res.choice;}
         else{resolved.push({key:rKey,choice:res.choice,at:new Date().toISOString()});}
         if(res.choice==='theirs'){
-            var idx=pairs.findIndex(function(p){return p===res.ex;});
+            var _eINr=(res.ex.imp&&res.ex.imp.contNr)||'';
+            var _eENr=(res.ex.exp&&res.ex.exp.contNr)||'';
+            var _eIId=(res.ex.imp&&res.ex.imp.id)||'';
+            var _eEId=(res.ex.exp&&res.ex.exp.id)||'';
+            var idx=pairs.findIndex(function(p){
+                var pI=(p.imp&&p.imp.contNr)||'';var pE=(p.exp&&p.exp.contNr)||'';
+                if(_eINr&&_eENr&&pI&&pE)return _eINr===pI&&_eENr===pE;
+                if(_eINr&&pI)return _eINr===pI;
+                if(_eENr&&pE)return _eENr===pE;
+                return (_eIId&&_eIId===((p.imp&&p.imp.id)||''))||(_eEId&&_eEId===((p.exp&&p.exp.id)||''));
+            });
             if(idx>=0)pairs[idx]=res.inc;
         }
     });
@@ -3226,10 +3235,10 @@ function cleanExpired(){
     (function(){
         var alerts={};
         try{alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
-        var pairs=ls.pairs();
+        var pairs=lp();
         var h7d=7*24*60*60*1000;
         Object.keys(alerts).forEach(function(key){
-            var p=pairs[parseInt(key)];
+            var p=pairs.find(function(x){return (((x.imp&&x.imp.contNr)||(x.imp&&x.imp.id)||'')+'|'+((x.exp&&x.exp.contNr)||(x.exp&&x.exp.id)||''))===key;});
             if(!p){delete alerts[key];return;}
             var de=pd(p.exp.delivery);
             if(de&&(Date.now()-de.getTime())>h7d)delete alerts[key];
@@ -3884,13 +3893,14 @@ function tcpToast(msg,duration){
     clearTimeout(t._timer);
     t._timer=setTimeout(function(){t.style.opacity='0';},duration||4000);
 }
-function tcpDismissPairAlert(idx,ev){
+function tcpDismissPairAlert(elOrIdx,ev){
     if(ev){ev.stopPropagation();ev.preventDefault();}
+    var key=typeof elOrIdx==='string'?elOrIdx:(elOrIdx&&elOrIdx.dataset?elOrIdx.dataset.k:String(elOrIdx));
     var alerts={};
     try{alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
-    if(alerts[idx]){
-        alerts[idx].dismissed=true;
-        alerts[idx].dismissedTooltip=alerts[idx].tooltip;
+    if(alerts[key]){
+        alerts[key].dismissed=true;
+        alerts[key].dismissedTooltip=alerts[key].tooltip;
     }
     localStorage.setItem('tcp_pair_alerts',JSON.stringify(alerts));
     rPairs();
