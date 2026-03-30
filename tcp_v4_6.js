@@ -1698,7 +1698,7 @@ function buildReportHtml(pairs, orders) {
 }
 function buildHTML(orders, settings, lastUpdate, newCount, newIds, modIds) {
     const pid  = pairedIds();
-    function _ha(s){return (s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/`/g,"&#96;").replace(/\$\{/g,"&#36;{");}
+    function _ha(s){return (s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/`/g,"&#96;").replace(/\${/g,"&#36;{");}
     const nset = new Set(newIds);
     const mset = new Set(modIds || []);
     const pairs = ls.pairs();
@@ -1727,9 +1727,9 @@ function buildHTML(orders, settings, lastUpdate, newCount, newIds, modIds) {
             const newBadge = isNew ? '<span style="background:#e74c3c;color:white;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:4px;vertical-align:middle;">NEW</span>' : '';
             const modBadge = isMod ? '<span style="background:#f0a500;color:white;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:4px;vertical-align:middle;">MOD</span>' : '';
             const missingBadge = o.missing ? ' <span style="background:#888;color:white;border-radius:3px;padding:1px 5px;font-size:8px;vertical-align:middle;white-space:nowrap;">non presente</span>' : '';
-            const rtIcon   = o.reqTruck ? `<span style="color:#c0392b;font-weight:bold;font-size:13px;" title="${o.reqTruck}">✕</span>` : '';
+            const rtIcon   = o.reqTruck ? `<span style="color:#c0392b;font-weight:bold;font-size:13px;" title="${_ha(o.reqTruck)}">✕</span>` : '';
             const hlBg     = o.highlighted ? '#f0a500' : '#002856';
-            const pallino  = (o.reqTruck || o.ldv) ? `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#e74c3c;margin:0 4px;vertical-align:middle;" title="${o.reqTruck?'RT: '+_ha(o.reqTruck)+' ':''}${o.ldv?'LDV emessa ':''}${o.adr?'ADR: '+o.adr:''}"></span>` : '';
+            const pallino  = (o.reqTruck || o.ldv) ? `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#e74c3c;margin:0 4px;vertical-align:middle;" title="${o.reqTruck?'RT: '+_ha(o.reqTruck)+' ':''}${o.ldv?'LDV emessa ':''}${o.adr?'ADR: '+_ha(o.adr):''}"></span>` : '';
             const ldvCell  = o.ldv ? '<span style="color:#c0392b;font-weight:bold;font-size:10px;">LDV Emessa</span>' : '';
             const adrIcon  = o.adr ? '<span title="Merce pericolosa" style="cursor:default;">⚠️</span>' : '';
             const placeIcon = o.place ? '<span style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;background:#999;color:white;font-size:8px;font-weight:bold;cursor:help;margin-left:4px;flex-shrink:0;" title="' + o.place.replace(/"/g,"'").replace(/`/g,"&#96;").replace(/\${/g,"&#36;{") + '">?</span>' : '';
@@ -1907,6 +1907,15 @@ function showTab(t){
     const editFlt2=document.getElementById('btn-edit-float');if(editFlt2)editFlt2.style.display='none';
     if(t==='pairs')rPairs();
     if(t==='planner')rPlanner();
+    if(t==='syncreport'){
+        var _srEl=document.getElementById('sr-timestamps');
+        if(_srEl){
+            function _fmtTs(iso){if(!iso)return'\u2014';try{var d=new Date(iso);return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});}catch(e){return iso;}}
+            var _myPub=localStorage.getItem('tcp_gist_my_last_pub');
+            var _colUpd=localStorage.getItem('tcp_gist_collega_last_update');
+            _srEl.innerHTML='Mio ultimo Gist: <b>'+_fmtTs(_myPub)+'<\/b> &nbsp;|&nbsp; Ultimo Gist collega: <b>'+_fmtTs(_colUpd)+'<\/b>';
+        }
+    }
     if(t==='tratte'){
         tcpRenderAlias();
         var _tr=[];try{_tr=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
@@ -2743,12 +2752,13 @@ function tcpCopiaExcel(i){
     }
     function _citta(addr){
         if(!addr)return'';
-        var part=addr.split('+')[0].trim();
-        // Tronca tutto da '(' in poi: 'SCANDICCI (FI) 50018' -> 'SCANDICCI'
-        var paren=part.indexOf('(');
-        if(paren>0)part=part.substring(0,paren).trim();
-        else part=part.replace(/\d{5}/g,'').trim();
-        return part.toUpperCase();
+        return addr.split('+').map(function(stop){
+            var s=stop.trim();
+            var paren=s.indexOf('(');
+            if(paren>0)s=s.substring(0,paren).trim();
+            else s=s.replace(/\d{5}/g,'').trim();
+            return s.toUpperCase();
+        }).filter(Boolean).join(' + ');
     }
     const compagnia=_carrier(p.imp.carrier);
     const tipo=_cont(p.imp.cont);
@@ -2961,6 +2971,7 @@ function tcpPublishGist(){
         .then(function(data){
             if(data.id){
                 localStorage.setItem('tcp_gist_id',data.id);
+                localStorage.setItem('tcp_gist_my_last_pub',new Date().toISOString());
                 if(btn){btn.textContent='\u2601\uFE0F Pubblica';btn.disabled=false;}
                 tcpToast('\u2601\uFE0F Pubblicato'+(gid?'':' - ID: '+data.id+' (salvato)'));
             }else{
@@ -3019,6 +3030,7 @@ function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
             if(data.files['tcp_pairs.json']){
                 var pp=JSON.parse(data.files['tcp_pairs.json'].content);
                 if(pp.pairs)pairsResult=tcpDoMerge(pp.pairs);
+                if(pp.exported)localStorage.setItem('tcp_gist_collega_last_update',pp.exported);
             }
             var tratteResult={toAdd:[],conflicts:[],ignored:0};
             if(data.files['tcp_tratte.json']){
@@ -3038,6 +3050,41 @@ function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
             alert('Errore: '+err.message);
         });
 }
+function tcpRipristinaGist(){
+    var tok=localStorage.getItem('tcp_gist_token')||'';
+    var gid=localStorage.getItem('tcp_gist_id')||'';
+    if(!tok){alert('Imposta prima il token GitHub nelle impostazioni.');tcpGistSettings();return;}
+    if(!gid){alert('Gist ID non trovato. Devi aver pubblicato almeno una volta da questa postazione.');tcpGistSettings();return;}
+    var btn=document.getElementById('btn-ripristina-gist');
+    if(btn){btn.textContent='Scaricamento...';btn.disabled=true;}
+    fetch('https://api.github.com/gists/'+gid,{headers:{'Authorization':'Bearer '+tok}})
+        .then(function(r){return r.json();})
+        .then(function(data){
+            if(btn){btn.textContent='\u2b07\ufe0f Ripristina da mio Gist';btn.disabled=false;}
+            if(!data.files){alert('Gist non trovato o vuoto.');return;}
+            var pairsResult={toAdd:[],conflicts:[],ignored:0};
+            if(data.files['tcp_pairs.json']){
+                var pp=JSON.parse(data.files['tcp_pairs.json'].content);
+                if(pp.pairs)pairsResult=tcpDoMerge(pp.pairs);
+            }
+            var tratteResult={toAdd:[],conflicts:[],ignored:0};
+            if(data.files['tcp_tratte.json']){
+                var tt=JSON.parse(data.files['tcp_tratte.json'].content);
+                if(tt.tratte)tratteResult=tcpDoMergeTratte(tt.tratte);
+            }
+            if(data.files['tcp_alias.json']){
+                var aa=JSON.parse(data.files['tcp_alias.json'].content);
+                if(aa.alias)tcpDoMergeAlias(aa.alias);
+            }
+            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'ripristino',autoPublish:false};
+            tcpShowSyncModal(_mergePayload);
+        })
+        .catch(function(err){
+            if(btn){btn.textContent='\u2b07\ufe0f Ripristina da mio Gist';btn.disabled=false;}
+            alert('Errore: '+err.message);
+        });
+}
+
 function tcpSyncGist(){
     var tok=localStorage.getItem('tcp_gist_token')||'';
     var gidc=localStorage.getItem('tcp_gist_id_collega')||'';
@@ -3865,6 +3912,7 @@ function tcpCheckCollegaSilent(){
             if(data.files['tcp_pairs.json']){
                 var pp=JSON.parse(data.files['tcp_pairs.json'].content);
                 if(pp.pairs)newPairs=tcpDoMerge(pp.pairs).toAdd.length;
+                if(pp.exported)localStorage.setItem('tcp_gist_collega_last_update',pp.exported);
             }
             if(data.files['tcp_tratte.json']){
                 var tt=JSON.parse(data.files['tcp_tratte.json'].content);
@@ -4152,8 +4200,8 @@ document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlann
     ${tarHtml}
 </div>
 
-<div id="t-report" class="tc" style="flex:1;overflow-y:auto;padding:12px 16px;">${reportHtml}</div>
-<div id="t-syncreport" class="tc" style="flex:1;overflow-y:auto;padding:12px 16px;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;border-bottom:2px solid #bdf3fc;padding-bottom:8px;"><b style="color:#002856;font-size:13px;">&#128260; Sync Report</b><div style="display:flex;gap:8px;align-items:center;"><button onclick="tcpApplyMergePairsModal()" style="background:#1a65b8;color:white;border:none;border-radius:4px;padding:5px 16px;cursor:pointer;font-size:12px;font-weight:bold;">&#10003; Applica</button><button onclick="tcpCloseMergePairsModal()" style="background:#aaa;color:white;border:none;border-radius:4px;padding:5px 12px;cursor:pointer;font-size:12px;">Annulla</button></div></div><p id="sr-summary" style="font-size:11px;color:#555;margin-bottom:12px;"></p><div id="sr-conflicts"><p style="color:#aaa;text-align:center;padding:40px;font-size:13px;">Nessun sync in corso.</p></div></div>
+<div id="t-report" class="tc" style="flex:1;overflow-y:auto;padding:12px 16px;"><div style="text-align:right;margin-bottom:10px;"><a href="https://mauler90.github.io/tcp-script/dashboard.html" target="_blank" style="display:inline-flex;align-items:center;gap:6px;background:#002856;color:white;text-decoration:none;border-radius:4px;padding:5px 14px;font-size:11px;font-weight:bold;">&#127760; Apri Dashboard</a></div>${reportHtml}</div>
+<div id="t-syncreport" class="tc" style="flex:1;overflow-y:auto;padding:12px 16px;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;border-bottom:2px solid #bdf3fc;padding-bottom:8px;"><div><b style="color:#002856;font-size:13px;">&#128260; Sync Report</b><div id="sr-timestamps" style="font-size:10px;color:#888;margin-top:3px;"></div></div><div style="display:flex;gap:8px;align-items:center;"><button onclick="tcpApplyMergePairsModal()" style="background:#1a65b8;color:white;border:none;border-radius:4px;padding:5px 16px;cursor:pointer;font-size:12px;font-weight:bold;">&#10003; Applica</button><button onclick="tcpCloseMergePairsModal()" style="background:#aaa;color:white;border:none;border-radius:4px;padding:5px 12px;cursor:pointer;font-size:12px;">Annulla</button></div></div><p id="sr-summary" style="font-size:11px;color:#555;margin-bottom:12px;"></p><div id="sr-conflicts"><p style="color:#aaa;text-align:center;padding:40px;font-size:13px;">Nessun sync in corso.</p></div><div style="margin-top:24px;padding-top:16px;border-top:2px dashed #d0dff0;"><div style="font-weight:bold;color:#002856;font-size:12px;margin-bottom:6px;">&#128194; Cambio postazione</div><p style="font-size:11px;color:#555;margin-bottom:10px;">Ripristina riutilizzi, tratte e alias dal tuo Gist su questa postazione.</p><button id="btn-ripristina-gist" data-label="&#11015;&#65039; Ripristina da mio Gist" onclick="tcpRipristinaGist()" style="background:#5b7fa6;color:white;border:none;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:12px;font-weight:bold;">&#11015;&#65039; Ripristina da mio Gist</button></div></div>
 
 <script>
 (function(){
@@ -4497,12 +4545,12 @@ function openOrUpdate(settings, lastUpdate, newCount, newIds, modIds) {
         win = window.open('', 'tcp_monitor_win', 'width=1500,height=850,resizable=yes,scrollbars=yes');
     window.tcpMonitorWin = win;
     const html = buildHTML(ls.orders(), settings, lastUpdate, newCount, newIds, modIds);
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-    // Forza layout flex su #t-viaggi dopo rebuild
-    try{ win.showTab('viaggi'); }catch(e){}
-    setTimeout(function(){ try{ win.tcpRestoreSavedFilters(); }catch(e){} }, 300);
+    var _blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    var _burl=URL.createObjectURL(_blob);
+    win.location.replace(_burl);
+    setTimeout(function(){URL.revokeObjectURL(_burl);},8000);
+    // Layout flex gestito da DOMContentLoaded nella finestra
+    // restoreFilters gestito da DOMContentLoaded
     // Toast se ci sono nuovi alert coppie
     try{
         var _alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');
@@ -4540,12 +4588,16 @@ function getFormSettings() {
     const ev = parseInt(document.getElementById('mon-ev')?.value) || 24;
     const eu = document.getElementById('mon-eu')?.value || 'hours';
     var ci = parseInt(document.getElementById('mon-check-interval')?.value) || 0;
+    var aspOn = document.getElementById('mon-autosyncpub-on')?.checked || false;
+    var aspInt = parseInt(document.getElementById('mon-autosyncpub-interval')?.value) || 30;
     return {
-        interval:      10,
-        intervalMin:   eu === 'days' ? ev * 1440 : ev * 60,
-        extractVal:    ev,
-        extractUnit:   eu,
-        checkInterval: ci,
+        interval:           10,
+        intervalMin:        eu === 'days' ? ev * 1440 : ev * 60,
+        extractVal:         ev,
+        extractUnit:        eu,
+        checkInterval:      ci,
+        autoSyncPubOn:      aspOn,
+        autoSyncPubInterval:aspInt,
         carriers:      ['MSC','Hapag','ONE','CMA','OOCL','ZIM','Yang Ming','Maersk','Evergreen'].filter(c => document.getElementById('mon-c-'+c.replace(' ',''))?.checked),
         containers:    ["20'","40'","40HC"].filter(t => document.getElementById('mon-t-'+t.replace("'",""))?.checked),
     };
@@ -4573,6 +4625,38 @@ function stop() {
 // ────────────────────────────────────────────────
 //  WIDGET GESTIONALE
 // ────────────────────────────────────────────────
+var _autoSyncPubTimer = null;
+function tcpStartAutoSyncPub(intervalMin) {
+    if (_autoSyncPubTimer) clearInterval(_autoSyncPubTimer);
+    _autoSyncPubTimer = null;
+    if (!intervalMin || intervalMin <= 0) return;
+    _autoSyncPubTimer = setInterval(function() {
+        var st = ss.load();
+        if (!st || !st.autoSyncPubOn) return;
+        var mw = window.tcpMonitorWin;
+        if (mw && !mw.closed && typeof mw.tcpSyncAndPublish === 'function') {
+            mw.tcpSyncAndPublish();
+        } else {
+            // Finestra non aperta: sync silenzioso senza aprire nulla
+            var tok = localStorage.getItem('tcp_gist_token') || '';
+            var gidc = localStorage.getItem('tcp_gist_id_collega') || '';
+            if (!tok || !gidc) return;
+            fetch('https://api.github.com/gists/' + gidc, {headers: {'Authorization': 'Bearer ' + tok}})
+                .then(function(r) { return r.json(); })
+                .then(function(gdata) {
+                    if (!gdata.files) return;
+                    if (gdata.files['tcp_pairs.json']) {
+                        var pp = JSON.parse(gdata.files['tcp_pairs.json'].content);
+                        if (pp.exported) localStorage.setItem('tcp_gist_collega_last_update', pp.exported);
+                    }
+                    // Sync silenzioso: solo badge, nessuna finestra
+                    tcpCheckCollegaSilent();
+                })
+                .catch(function() {});
+        }
+    }, intervalMin * 60000);
+}
+
 function tcpToggleAutoGist(mode) {
     var st = ss.load() || {};
     st.autoGist = (st.autoGist === mode) ? null : mode;
@@ -4614,6 +4698,15 @@ function buildWidget() {
                 style="width:36px;border:1px solid #002856;border-radius:3px;padding:2px 3px;color:#002856;font-size:11px;">
             <span>min (0=mai)</span>
         </div>
+        <div style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:5px;">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;flex:1;">
+                <input id="mon-autosyncpub-on" type="checkbox" ${state?.autoSyncPubOn?'checked':''} style="cursor:pointer;">
+                <span style="white-space:nowrap;">Auto Sync+Pub ogni:</span>
+            </label>
+            <input id="mon-autosyncpub-interval" type="number" min="1" max="999" value="${state?.autoSyncPubInterval||30}"
+                style="width:36px;border:1px solid #002856;border-radius:3px;padding:2px 3px;color:#002856;font-size:11px;">
+            <span>min</span>
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-bottom:7px;">
             <button id="mon-auto-sync" style="background:${state?.autoGist==='sync'?'#1a65b8':'#e8ecf4'};color:${state?.autoGist==='sync'?'white':'#002856'};border:1px solid #002856;border-radius:4px;padding:3px 2px;font-size:10px;font-weight:bold;cursor:pointer;">Auto Sync</button>
             <button id="mon-auto-pub" style="background:${state?.autoGist==='pub'?'#1a65b8':'#e8ecf4'};color:${state?.autoGist==='pub'?'white':'#002856'};border:1px solid #002856;border-radius:4px;padding:3px 2px;font-size:10px;font-weight:bold;cursor:pointer;">Auto Pub</button>
@@ -4621,12 +4714,12 @@ function buildWidget() {
         </div>
         <div style="font-weight:bold;margin-bottom:3px;font-size:11px;">Compagnie:</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-bottom:7px;font-size:11px;">
-            ${['MSC','Hapag','ONE','CMA'].map(c=>`<label style="display:flex;align-items:center;gap:3px;"><input id="mon-c-${c}" type="checkbox" ${!state||state.carriers?.includes(c)?'checked':''}> ${c}</label>`).join('')}
+            ${['MSC','Hapag','ONE','CMA'].map(c=>`<label style="display:flex;align-items:center;gap:3px;"><input id="mon-c-${c}" type="checkbox" ${!state?.carriers||state.carriers.includes(c)?'checked':''}> ${c}</label>`).join('')}
             ${['OOCL','ZIM','Yang Ming','Maersk','Evergreen'].map(c=>`<label style="display:flex;align-items:center;gap:3px;"><input id="mon-c-${c.replace(' ','')}" type="checkbox" ${state&&state.carriers?.includes(c)?'checked':''}> ${c}</label>`).join('')}
         </div>
         <div style="font-weight:bold;margin-bottom:3px;font-size:11px;">Container:</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px;margin-bottom:9px;font-size:11px;">
-            ${[["20'","20"],["40'","40"],["40HC","40HC"]].map(([l,id])=>`<label style="display:flex;align-items:center;gap:2px;"><input id="mon-t-${id}" type="checkbox" ${!state||state.containers?.includes(l)?'checked':''}> ${l}</label>`).join('')}
+            ${[["20'","20"],["40'","40"],["40HC","40HC"]].map(([l,id])=>`<label style="display:flex;align-items:center;gap:2px;"><input id="mon-t-${id}" type="checkbox" ${!state?.containers||state.containers.includes(l)?'checked':''}> ${l}</label>`).join('')}
         </div>
         <hr style="border:none;border-top:1px solid #c8d8f0;margin:6px 0;">
         <button id="mon-btn" style="width:100%;background:#002856;color:white;border:none;border-radius:4px;padding:6px;font-size:12px;cursor:pointer;font-weight:bold;margin-bottom:5px;">
@@ -4676,6 +4769,8 @@ function buildWidget() {
         if (win && !win.closed && win.tcpStartAutoCheck) {
             win.tcpStartAutoCheck(s.checkInterval || 0);
         }
+        // Avvia/ferma auto sync+pub
+        tcpStartAutoSyncPub(s.autoSyncPubOn ? (s.autoSyncPubInterval || 30) : 0);
         // Auto Gist dopo scansione
         var autoGist = s.autoGist;
         if (autoGist === 'sync') {
@@ -4715,6 +4810,10 @@ waitForTable(() => {
     buildWidget();
     const state = ss.load();
     if (state?.running) runCycle();
+    // Ripristina auto sync+pub se era attivo
+    if (state?.autoSyncPubOn && state?.autoSyncPubInterval) {
+        tcpStartAutoSyncPub(state.autoSyncPubInterval);
+    }
 });
 
 
