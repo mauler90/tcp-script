@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.2
 // @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
@@ -1442,7 +1442,7 @@ function collect(intervalMin, carriers, containers) {
             var changes = [];
             ['imp','exp'].forEach(function(side) {
                 var ref = p[side];
-                var live = merged.find(function(o){ return o.id === ref.id; });
+                var live = merged.find(function(o){ return o.id === ref.id && o.traffic.toLowerCase() === (ref.traffic||'').toLowerCase(); });
                 if (!live) return;
                 fields.forEach(function(f) {
                     if (live[f.k] !== undefined && ref[f.k] !== undefined && live[f.k] !== ref[f.k]) {
@@ -1531,7 +1531,35 @@ function buildReportHtml(pairs, orders) {
     var tappe=[]; try{tappe=JSON.parse(localStorage.getItem('tcp_tappe_custom')||'[]');}catch(e){}
     var stats=null; try{stats=JSON.parse(localStorage.getItem('tcp_stats')||'null');}catch(e){}
     var today=new Date(); today.setHours(0,0,0,0);
-    if(!stats&&pairs.length>0){stats={total:pairs.length,monthly:{},note:'init'};localStorage.setItem('tcp_stats',JSON.stringify(stats));}
+    // Ricostruisce mensili se stats era stato inizializzato senza dettaglio
+    if(stats&&stats.note==='init'&&stats.monthly&&Object.keys(stats.monthly).length===0&&pairs.length>0){
+        pairs.forEach(function(p){
+            if(!p.at)return;
+            var _mn=p.at.substring(0,7);
+            if(!stats.monthly[_mn])stats.monthly[_mn]={total:0};
+            stats.monthly[_mn].total=(stats.monthly[_mn].total||0)+1;
+            var _car=(p.imp&&p.imp.carrier)||'';
+            var _co=((p.imp&&p.imp.cont)||'').replace("'","");
+            var _k=_car+'_'+_co;
+            if(_car&&_co)stats.monthly[_mn][_k]=(stats.monthly[_mn][_k]||0)+1;
+        });
+        stats.note='reconstructed';
+        localStorage.setItem('tcp_stats',JSON.stringify(stats));
+    }
+    if(!stats&&pairs.length>0){
+        stats={total:pairs.length,monthly:{},note:'init'};
+        pairs.forEach(function(p){
+            if(!p.at)return;
+            var _mn=p.at.substring(0,7);
+            if(!stats.monthly[_mn])stats.monthly[_mn]={total:0};
+            stats.monthly[_mn].total=(stats.monthly[_mn].total||0)+1;
+            var _car=(p.imp&&p.imp.carrier)||'';
+            var _co=((p.imp&&p.imp.cont)||'').replace("'","");
+            var _k=_car+'_'+_co;
+            if(_car&&_co)stats.monthly[_mn][_k]=(stats.monthly[_mn][_k]||0)+1;
+        });
+        localStorage.setItem('tcp_stats',JSON.stringify(stats));
+    }
 
     function card(title,html){
         return '<div style="background:white;border:1px solid #d0dff0;border-radius:6px;padding:12px 16px;margin-bottom:12px;">'
@@ -2276,17 +2304,26 @@ function tcpParseAddress(address,cid){
     if(!stops.length||!stops[0].trim())stops=[''];
     stops.forEach(function(stop){
         var row=tcpMakeStopRow(cid);
-        var m=stop.trim().match(/^(.*?)\s*\(([A-Z]{2})\)\s*(\d{5})?/);
+        var s=stop.trim();
+        var city='',prov='',cap='';
+        // Formato 1 (form): "Citta (PV) 12345" oppure "Citta (PV)"
+        var m1=s.match(/^(.*?)\\s*\\(([A-Z]{2})\\)\\s*(\\d{5})?/);
+        // Formato 2 (gestionale): "Citta (PV 12345)" — cap dentro le parentesi
+        var m2=s.match(/^(.*?)\\s*\\(([A-Z]{2})\\s+(\\d{5})\\)/);
+        // Formato 3 (gestionale): "Citta 12345 (PV)" — cap prima della provincia
+        var m3=s.match(/^(.*?)\\s+(\\d{5})\\s*\\(([A-Z]{2})\\)/);
+        if(m2){city=m2[1].trim();prov=m2[2];cap=m2[3];}
+        else if(m3){city=m3[1].trim();prov=m3[3];cap=m3[2];}
+        else if(m1){city=m1[1].trim();prov=m1[2];cap=m1[3]||'';}
+        else{city=s;}
+        // Pulizia: rimuove eventuale parentesi aperta residua in fondo alla citta
+        city=city.replace(/\\s*\\(\\s*$/,'').trim();
         var cityInp=row.querySelector('.stop-city');
         var provInp=row.querySelector('.stop-prov');
         var capInp=row.querySelector('.stop-cap');
-        if(m){
-            if(cityInp)cityInp.value=m[1].trim();
-            if(provInp)provInp.value=m[2];
-            if(capInp&&m[3])capInp.value=m[3];
-        }else{
-            if(cityInp)cityInp.value=stop.trim();
-        }
+        if(cityInp)cityInp.value=city;
+        if(provInp)provInp.value=prov;
+        if(capInp)capInp.value=cap;
         c.appendChild(row);
     });
     tcpUpdateRemoveBtns(cid);
@@ -2528,8 +2565,14 @@ function buildPairsHtml(){
                 var _stableKey=((p.imp&&p.imp.contNr)||(p.imp&&p.imp.id)||'')+'|'+((p.exp&&p.exp.contNr)||(p.exp&&p.exp.id)||'');
                 var _al=_alerts[_stableKey];
                 var _alTip=_al?_al.tooltip.split('"').join('&#34;').split(String.fromCharCode(10)).join(' | '):'';
-                var _alSpan='<span data-k="'+_stableKey+'" onclick="tcpDismissPairAlert(this,event)" title="'+_alTip+'" style="cursor:pointer;background:#e67e22;color:white;border-radius:3px;padding:2px 7px;font-size:11px;font-weight:bold;margin-right:4px;">\u26a0\ufe0f Modificato \u2715</span>';
-                var _alBadge=(_al&&!_al.dismissed)?_alSpan:'';
+                var _alSpan=(_al&&!_al.dismissed)
+                    ?'<span style="display:inline-flex;align-items:center;gap:3px;margin-right:4px;">'
+                    +'<span style="background:#e67e22;color:white;border-radius:3px;padding:2px 5px;font-size:11px;font-weight:bold;">\u26a0\ufe0f</span>'
+                    +'<button data-k="'+_stableKey+'" onclick="tcpAccettaVariazione(this,event)" title="'+_alTip+'" style="cursor:pointer;background:#27ae60;color:white;border:none;border-radius:3px;padding:2px 7px;font-size:11px;font-weight:bold;">\u2713 Accetta</button>'
+                    +'<button data-k="'+_stableKey+'" onclick="tcpDismissPairAlert(this,event)" style="cursor:pointer;background:#888;color:white;border:none;border-radius:3px;padding:2px 7px;font-size:11px;">\u2715 Ignora</button>'
+                    +'</span>'
+                    :'';
+                var _alBadge=_alSpan;
                 var _alBorder=(_al&&!_al.dismissed)?'outline:2px solid #e67e22;':'';
                 return \`<div class="pr" id="pair-\${realIdx}" style="border-left:4px solid \${bg};background:\${bg}22;\${_alBorder}">
                     \${_alBadge}<span class="tag imp">📥 IMP</span>
@@ -2557,7 +2600,10 @@ function rPairs(){
     const c=document.getElementById('pairs-content');
     if(c)c.innerHTML=buildPairsHtml();
     const btn=document.querySelector('.tb[data-t="pairs"]');
-    if(btn)btn.textContent='🔗 Riutilizzi ('+lp().length+')';
+    var _today=new Date();_today.setHours(0,0,0,0);
+    var _ieri=new Date(_today);_ieri.setDate(_today.getDate()-1);
+    var _attivi=lp().filter(function(p){var de=pd(p.exp.delivery);return !de||de>=_ieri;}).length;
+    if(btn)btn.textContent='🔗 Riutilizzi ('+_attivi+')';
 }
 
 function cpPair(i){
@@ -2857,6 +2903,8 @@ function tcpDoMerge(incoming){
     incoming.forEach(function(inc){
         var rKey=(t(inc.imp&&inc.imp.contNr)||t(inc.imp&&inc.imp.id))+'|'+(t(inc.exp&&inc.exp.contNr)||t(inc.exp&&inc.exp.id));
         if(removed.some(function(r){return(r.key||r)===rKey;})){ignored++;return;}
+        var _incExpDel=pd((inc.exp&&inc.exp.delivery)||'');
+        if(_incExpDel&&_incExpDel<monday(0)){ignored++;return;}
         var iNr=t(inc.imp&&inc.imp.contNr);
         var eNr=t(inc.exp&&inc.exp.contNr);
         var found=null;var foundType=null;
@@ -3953,6 +4001,39 @@ function tcpDismissPairAlert(elOrIdx,ev){
     localStorage.setItem('tcp_pair_alerts',JSON.stringify(alerts));
     rPairs();
 }
+function tcpAccettaVariazione(elOrIdx,ev){
+    if(ev){ev.stopPropagation();ev.preventDefault();}
+    var key=typeof elOrIdx==='string'?elOrIdx:(elOrIdx&&elOrIdx.dataset?elOrIdx.dataset.k:null);
+    if(!key)return;
+    var pairs=lp();
+    var orders=lo();
+    var fields=['delivery','address','port','carrier','cont'];
+    var changed=false;
+    pairs.forEach(function(p){
+        var pKey=((p.imp&&p.imp.contNr)||(p.imp&&p.imp.id)||'')+'|'+(( p.exp&&p.exp.contNr)||(p.exp&&p.exp.id)||'');
+        if(pKey!==key)return;
+        ['imp','exp'].forEach(function(side){
+            var ref=p[side];
+            var live=orders.find(function(o){return o.id===ref.id&&(o.traffic||'').toLowerCase()===(ref.traffic||'').toLowerCase();});
+            if(!live)return;
+            fields.forEach(function(f){
+                if(live[f]!==undefined&&ref[f]!==undefined&&live[f]!==ref[f]){
+                    ref[f]=live[f];
+                    changed=true;
+                }
+            });
+        });
+    });
+    if(changed)sp(pairs);
+    // Rimuovi alert
+    var alerts={};
+    try{alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}')}catch(e){}
+    delete alerts[key];
+    localStorage.setItem('tcp_pair_alerts',JSON.stringify(alerts));
+    rPairs();
+    tcpToast('\u2713 Variazione accettata e coppia aggiornata');
+}
+
 function tcpSaveFilters(){
     var f={
         c:[...document.querySelectorAll('.fs-c:checked')].map(x=>x.value),
@@ -3993,7 +4074,13 @@ document.addEventListener('DOMContentLoaded',()=>{cleanExpired();rPairs();rPlann
         tcpCheckCollegaSilent();
         var _ci=parseInt(localStorage.getItem('tcp_gist_check_interval')||'0');
         if(_ci>0)tcpStartAutoCheck(_ci);
-    },3000);});
+    },3000);
+    setTimeout(function(){
+        var _pal={};
+        try{_pal=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
+        var _nAl=Object.values(_pal).filter(function(a){return !a.dismissed;}).length;
+        if(_nAl>0)tcpToast('\u26a0\ufe0f '+_nAl+' riutilizz'+(_nAl===1?'o':'i')+' con dati modificati',6000);
+    },500);});
 <\/script>
 </head><body style="display:flex;flex-direction:column;height:100vh;overflow:hidden;">
 
@@ -4551,14 +4638,6 @@ function openOrUpdate(settings, lastUpdate, newCount, newIds, modIds) {
     setTimeout(function(){URL.revokeObjectURL(_burl);},8000);
     // Layout flex gestito da DOMContentLoaded nella finestra
     // restoreFilters gestito da DOMContentLoaded
-    // Toast se ci sono nuovi alert coppie
-    try{
-        var _alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');
-        var _nAlert=Object.values(_alerts).filter(function(a){return !a.dismissed;}).length;
-        if(_nAlert>0&&win&&!win.closed&&win.tcpToast){
-            win.tcpToast('\u26a0\ufe0f '+_nAlert+' riutilizz'+(parseInt(_nAlert)===1?'o':'i')+' con dati modificati',6000);
-        }
-    }catch(e){}
 }
 
 // ────────────────────────────────────────────────
