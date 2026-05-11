@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      2.2
+// @version      2.3
 // @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
@@ -1443,7 +1443,7 @@ function collect(intervalMin, carriers, containers) {
             ['imp','exp'].forEach(function(side) {
                 var ref = p[side];
                 var live = merged.find(function(o){ return o.id === ref.id && o.traffic.toLowerCase() === (ref.traffic||'').toLowerCase(); });
-                if (!live) return;
+                if (!live || live.missing) return;
                 fields.forEach(function(f) {
                     if (live[f.k] !== undefined && ref[f.k] !== undefined && live[f.k] !== ref[f.k]) {
                         changes.push(side.toUpperCase() + ' ' + f.label + ': ' + ref[f.k] + ' -> ' + live[f.k]);
@@ -2545,8 +2545,8 @@ function buildPairsHtml(){
     const allPairs=lp();
     if(!allPairs.length)return'<p style="color:#aaa;text-align:center;padding:40px;font-size:13px;">Nessun abbinamento. Seleziona un Import + Export nella tab Viaggi e clicca Abbina.</p>';
     const today=new Date();today.setHours(0,0,0,0);
-    const ieri=new Date(today);ieri.setDate(today.getDate()-1);
-    const pairs=allPairs.filter((p,i)=>{const de=pd(p.exp.delivery);return !de||de>=ieri;});
+    const monStart=monday(0);
+    const pairs=allPairs.filter((p,i)=>{const de=pd(p.exp.delivery);return !de||de>=monStart;});
     const hidden=allPairs.length-pairs.length;
     if(!pairs.length)return'<p style="color:#aaa;text-align:center;padding:40px;font-size:13px;">Nessun riutilizzo attivo.</p>'+(hidden?'<p style="color:#aaa;font-size:11px;text-align:center;">'+hidden+' riutilizzi precedenti nascosti</p>':'');
     const groups={};
@@ -2601,8 +2601,8 @@ function rPairs(){
     if(c)c.innerHTML=buildPairsHtml();
     const btn=document.querySelector('.tb[data-t="pairs"]');
     var _today=new Date();_today.setHours(0,0,0,0);
-    var _ieri=new Date(_today);_ieri.setDate(_today.getDate()-1);
-    var _attivi=lp().filter(function(p){var de=pd(p.exp.delivery);return !de||de>=_ieri;}).length;
+    var _monStart=monday(0);
+    var _attivi=lp().filter(function(p){var de=pd(p.exp.delivery);return !de||de>=_monStart;}).length;
     if(btn)btn.textContent='🔗 Riutilizzi ('+_attivi+')';
 }
 
@@ -2896,7 +2896,7 @@ function tcpExportPairs(){
 // -- MERGE LOGIC --
 function tcpDoMerge(incoming){
     var existing=lp();
-    var toAdd=[];var conflicts=[];var ignored=0;
+    var toAdd=[];var conflicts=[];var ignored=0;var updates=[];
     var t=function(s){return(s||'').trim();};
     var removed=[];
     try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
@@ -2929,7 +2929,13 @@ function tcpDoMerge(incoming){
             }
         }
         if(!found){toAdd.push(inc);}
-        else if(foundType==='exact'){ignored++;}
+        else if(foundType==='exact'){
+            var _upd={};
+            if(inc.tappa&&!found.tappa)_upd.tappa=inc.tappa;
+            if(inc.km&&!found.km)_upd.km=inc.km;
+            if(Object.keys(_upd).length)updates.push({id:(found.imp.contNr||found.imp.id),upd:_upd});
+            ignored++;
+        }
         else{
             var _resolved=[];
             try{_resolved=JSON.parse(localStorage.getItem('tcp_resolved_conflicts')||'[]');}catch(e){}
@@ -2945,12 +2951,17 @@ function tcpDoMerge(incoming){
             }
         }
     });
-    return{toAdd:toAdd,conflicts:conflicts,ignored:ignored};
+    return{toAdd:toAdd,conflicts:conflicts,ignored:ignored,updates:updates};
 }
-function tcpApplyMergePairs(toAdd,conflictResolutions){
+function tcpApplyMergePairs(toAdd,conflictResolutions,updates){
     _pushUndo();
     var pairs=lp();
     toAdd.forEach(function(p){pairs.push(p);});
+    // Applica aggiornamenti tappa/km su coppie esistenti
+    (updates||[]).forEach(function(u){
+        var p=pairs.find(function(x){return (x.imp.contNr||x.imp.id)===u.id;});
+        if(p)Object.assign(p,u.upd);
+    });
     var resolved=[];
     try{resolved=JSON.parse(localStorage.getItem('tcp_resolved_conflicts')||'[]');}catch(e){}
     conflictResolutions.forEach(function(res){
@@ -3004,10 +3015,12 @@ function tcpPublishGist(){
     var pairs=lp();
     var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
     var alias=[];try{alias=JSON.parse(localStorage.getItem('tcp_tratte_alias')||'[]');}catch(e){}
+    var tappe=[];try{tappe=JSON.parse(localStorage.getItem('tcp_tappe_custom')||'[]');}catch(e){}
     var files={
         'tcp_pairs.json':{content:JSON.stringify({version:1,exported:ts,pairs:pairs},null,2)},
         'tcp_tratte.json':{content:JSON.stringify({version:1,exported:ts,tratte:tratte},null,2)},
-        'tcp_alias.json':{content:JSON.stringify({version:1,exported:ts,alias:alias},null,2)}
+        'tcp_alias.json':{content:JSON.stringify({version:1,exported:ts,alias:alias},null,2)},
+        'tcp_tappe.json':{content:JSON.stringify({version:1,exported:ts,tappe:tappe},null,2)}
     };
     var body=JSON.stringify({description:'S.R.C sync',public:false,files:files});
     var url=gid?'https://api.github.com/gists/'+gid:'https://api.github.com/gists';
@@ -3055,6 +3068,15 @@ function tcpDoMergeAlias(incoming){
     if(added>0)localStorage.setItem('tcp_tratte_alias',JSON.stringify(existing));
     return{added:added};
 }
+function tcpDoMergeTappeCustom(incoming){
+    var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tappe_custom')||'[]');}catch(e){}
+    var added=0;
+    incoming.forEach(function(t){
+        if(existing.indexOf(t)<0){existing.push(t);added++;}
+    });
+    if(added>0)localStorage.setItem('tcp_tappe_custom',JSON.stringify(existing));
+    return added;
+}
 function tcpDoMergeTariffario(incoming){
     var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
     var toAdd=[];var conflicts=[];var ignored=0;
@@ -3088,6 +3110,10 @@ function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
             if(data.files['tcp_alias.json']){
                 var aa=JSON.parse(data.files['tcp_alias.json'].content);
                 if(aa.alias)tcpDoMergeAlias(aa.alias);
+            }
+            if(data.files['tcp_tappe.json']){
+                var tp=JSON.parse(data.files['tcp_tappe.json'].content);
+                if(tp.tappe)tcpDoMergeTappeCustom(tp.tappe);
             }
             _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'gist',autoPublish:autoPublish};
             tcpSetPairsBadge(0);
@@ -3123,6 +3149,10 @@ function tcpRipristinaGist(){
             if(data.files['tcp_alias.json']){
                 var aa=JSON.parse(data.files['tcp_alias.json'].content);
                 if(aa.alias)tcpDoMergeAlias(aa.alias);
+            }
+            if(data.files['tcp_tappe.json']){
+                var tp=JSON.parse(data.files['tcp_tappe.json'].content);
+                if(tp.tappe)tcpDoMergeTappeCustom(tp.tappe);
             }
             _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'ripristino',autoPublish:false};
             tcpShowSyncModal(_mergePayload);
@@ -3256,7 +3286,7 @@ function tcpApplyMergePairsModal(){
         var sel=document.querySelector('input[name="mpc'+ci+'"]:checked');
         return{ex:cf.ex,inc:cf.inc,choice:sel?sel.value:'mine'};
     });
-    tcpApplyMergePairs(pD.toAdd||[],pRes);
+    tcpApplyMergePairs(pD.toAdd||[],pRes,pD.updates||[]);
     tcpRefresh();
     // Tratte
     var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
@@ -4754,8 +4784,17 @@ function tcpToggleAutoGist(mode) {
 function buildWidget() {
     if (document.getElementById('tcp-mon-widget')) return;
     let state = ss.load();
-    if(!state){state={autoGist:'syncpub'};ss.save(state);}
-    else if(!state.autoGist){state.autoGist='syncpub';ss.save(state);}
+    if(!state){state={autoGist:'syncpub',autoSyncPubOn:true,autoSyncPubInterval:5,checkInterval:5,_v:2};ss.save(state);}
+    else{
+        if(!state._v||state._v<2){
+            state.autoGist=state.autoGist||'syncpub';
+            state.autoSyncPubOn=true;
+            state.autoSyncPubInterval=5;
+            state.checkInterval=5;
+            state._v=2;
+            ss.save(state);
+        }
+    }
     const run = state?.running || false;
     const box = document.createElement('div');
     box.id = 'tcp-mon-widget';
@@ -4773,16 +4812,16 @@ function buildWidget() {
         </div>
         <div style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:5px;">
             <span style="white-space:nowrap;">Controlla collega ogni:</span>
-            <input id="mon-check-interval" type="number" min="0" max="999" value="${state?.checkInterval||10}"
+            <input id="mon-check-interval" type="number" min="0" max="999" value="${state?.checkInterval||5}"
                 style="width:36px;border:1px solid #002856;border-radius:3px;padding:2px 3px;color:#002856;font-size:11px;">
             <span>min (0=mai)</span>
         </div>
         <div style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:5px;">
             <label style="display:flex;align-items:center;gap:4px;cursor:pointer;flex:1;">
-                <input id="mon-autosyncpub-on" type="checkbox" ${state?.autoSyncPubOn?'checked':''} style="cursor:pointer;">
+                <input id="mon-autosyncpub-on" type="checkbox" ${state?.autoSyncPubOn!==false?'checked':''} style="cursor:pointer;">
                 <span style="white-space:nowrap;">Auto Sync+Pub ogni:</span>
             </label>
-            <input id="mon-autosyncpub-interval" type="number" min="1" max="999" value="${state?.autoSyncPubInterval||30}"
+            <input id="mon-autosyncpub-interval" type="number" min="1" max="999" value="${state?.autoSyncPubInterval||5}"
                 style="width:36px;border:1px solid #002856;border-radius:3px;padding:2px 3px;color:#002856;font-size:11px;">
             <span>min</span>
         </div>
@@ -4849,7 +4888,7 @@ function buildWidget() {
             win.tcpStartAutoCheck(s.checkInterval || 0);
         }
         // Avvia/ferma auto sync+pub
-        tcpStartAutoSyncPub(s.autoSyncPubOn ? (s.autoSyncPubInterval || 30) : 0);
+        tcpStartAutoSyncPub(s.autoSyncPubOn ? (s.autoSyncPubInterval || 5) : 0);
         // Auto Gist dopo scansione
         var autoGist = s.autoGist;
         if (autoGist === 'sync') {
