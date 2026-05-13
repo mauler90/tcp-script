@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      2.3
+// @version      2.4
 // @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
@@ -117,6 +117,7 @@ function normalizeCarrier(text) {
 function normalizeContainer(text) {
     if (/reef/i.test(text))      return "40'R";
     if (/open.?top/i.test(text)) return "40OT";
+    if (/hard.?top/i.test(text)) return null;
     if (/20/i.test(text))        return "20'";
     if (/40/i.test(text) && /high|hc/i.test(text)) return "40HC";
     if (/40/i.test(text))        return "40'";
@@ -1172,6 +1173,7 @@ function ncr(t) {
 function nct(t) {
     if (/reef/i.test(t))      return "40'R";
     if (/open.?top/i.test(t)) return "40OT";
+    if (/hard.?top/i.test(t)) return null;
     if (/20/i.test(t))        return "20'";
     if (/40/i.test(t) && /high|hc/i.test(t)) return '40HC';
     if (/40/i.test(t))        return "40'";
@@ -1737,7 +1739,9 @@ function buildHTML(orders, settings, lastUpdate, newCount, newIds, modIds) {
     const fuelVal = parseFloat(localStorage.getItem('tcp_fuel') || '0');
     const tratteHtml = buildTratteHtml();
     const reportHtml = buildReportHtml(pairs, ls.orders());
-    const addiz = (function(){ try{ return JSON.parse(localStorage.getItem('tcp_addizionali')||'null'); }catch(e){} return null; })() || {stessoGiorno:{base:100,hc:30},giornoSucc:{base:100,sosta:30,hc:30},weekend:{base:50,hc:30},altri:{base:50,hc:30}};
+    const _addizRaw=(function(){try{return JSON.parse(localStorage.getItem('tcp_addizionali')||'null');}catch(e){}return null;})();
+    const _addizDef={stessoGiorno:{base:100,hc:30},giornoSucc:{base:100,notte:30,hc:30},weekend:{base:50,hc:30},altri:{base:50,hc:30}};
+    const addiz=(_addizRaw&&_addizRaw.stessoGiorno&&_addizRaw.giornoSucc&&_addizRaw.weekend&&_addizRaw.altri)?_addizRaw:_addizDef;
 
     // ── Tab Viaggi: righe tabella ──
     const tableRows = orders.length === 0
@@ -3016,11 +3020,13 @@ function tcpPublishGist(){
     var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
     var alias=[];try{alias=JSON.parse(localStorage.getItem('tcp_tratte_alias')||'[]');}catch(e){}
     var tappe=[];try{tappe=JSON.parse(localStorage.getItem('tcp_tappe_custom')||'[]');}catch(e){}
+    var manOrders=[];try{manOrders=JSON.parse(localStorage.getItem('tcp_mon_orders')||'[]').filter(function(o){return o.manual;});}catch(e){}
     var files={
         'tcp_pairs.json':{content:JSON.stringify({version:1,exported:ts,pairs:pairs},null,2)},
         'tcp_tratte.json':{content:JSON.stringify({version:1,exported:ts,tratte:tratte},null,2)},
         'tcp_alias.json':{content:JSON.stringify({version:1,exported:ts,alias:alias},null,2)},
-        'tcp_tappe.json':{content:JSON.stringify({version:1,exported:ts,tappe:tappe},null,2)}
+        'tcp_tappe.json':{content:JSON.stringify({version:1,exported:ts,tappe:tappe},null,2)},
+        'tcp_manual_orders.json':{content:JSON.stringify({version:1,exported:ts,orders:manOrders},null,2)}
     };
     var body=JSON.stringify({description:'S.R.C sync',public:false,files:files});
     var url=gid?'https://api.github.com/gists/'+gid:'https://api.github.com/gists';
@@ -3077,6 +3083,33 @@ function tcpDoMergeTappeCustom(incoming){
     if(added>0)localStorage.setItem('tcp_tappe_custom',JSON.stringify(existing));
     return added;
 }
+function tcpDoMergeManuali(incoming){
+    var orders=lo();
+    var changed=false;
+    var added=0;var updated=0;
+    incoming.forEach(function(inc){
+        if(!inc.manual)return;
+        var ex=orders.find(function(o){
+            if(!o.manual)return false;
+            if(o.id&&inc.id&&o.id===inc.id)return true;
+            return o.carrier===inc.carrier&&o.address===inc.address&&o.delivery===inc.delivery&&o.traffic===inc.traffic;
+        });
+        if(!ex){
+            var clone=JSON.parse(JSON.stringify(inc));
+            clone.manualFrom='collega';
+            orders.push(clone);
+            added++;changed=true;
+        } else {
+            var dirty=false;
+            ['carrier','cont','contNr','address','delivery','port','reqBranch','branch','reqTruck','ldv','adr','place','traffic'].forEach(function(k){
+                if(inc[k]!==undefined&&inc[k]!==ex[k]){ex[k]=inc[k];dirty=true;}
+            });
+            if(dirty){ex.manualFrom='collega';updated++;changed=true;}
+        }
+    });
+    if(changed)ls.saveOrders(orders);
+    return{added:added,updated:updated};
+}
 function tcpDoMergeTariffario(incoming){
     var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
     var toAdd=[];var conflicts=[];var ignored=0;
@@ -3115,7 +3148,12 @@ function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
                 var tp=JSON.parse(data.files['tcp_tappe.json'].content);
                 if(tp.tappe)tcpDoMergeTappeCustom(tp.tappe);
             }
-            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'gist',autoPublish:autoPublish};
+            var manualiResult={added:0,updated:0};
+            if(data.files['tcp_manual_orders.json']){
+                var mo=JSON.parse(data.files['tcp_manual_orders.json'].content);
+                if(mo.orders)manualiResult=tcpDoMergeManuali(mo.orders);
+            }
+            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},manuali:manualiResult,source:'gist',autoPublish:autoPublish};
             tcpSetPairsBadge(0);
             tcpShowSyncModal(_mergePayload);
         })
@@ -3154,7 +3192,12 @@ function tcpRipristinaGist(){
                 var tp=JSON.parse(data.files['tcp_tappe.json'].content);
                 if(tp.tappe)tcpDoMergeTappeCustom(tp.tappe);
             }
-            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'ripristino',autoPublish:false};
+            var manualiResult={added:0,updated:0};
+            if(data.files['tcp_manual_orders.json']){
+                var mo=JSON.parse(data.files['tcp_manual_orders.json'].content);
+                if(mo.orders)manualiResult=tcpDoMergeManuali(mo.orders);
+            }
+            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},manuali:manualiResult,source:'ripristino',autoPublish:false};
             tcpShowSyncModal(_mergePayload);
         })
         .catch(function(err){
