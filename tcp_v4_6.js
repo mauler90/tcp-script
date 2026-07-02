@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      2.4
+// @version      2.3
 // @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
@@ -117,7 +117,6 @@ function normalizeCarrier(text) {
 function normalizeContainer(text) {
     if (/reef/i.test(text))      return "40'R";
     if (/open.?top/i.test(text)) return "40OT";
-    if (/hard.?top/i.test(text)) return null;
     if (/20/i.test(text))        return "20'";
     if (/40/i.test(text) && /high|hc/i.test(text)) return "40HC";
     if (/40/i.test(text))        return "40'";
@@ -770,7 +769,7 @@ function tcpMergeTratteGest(input) {
         var existing = []; try { existing = JSON.parse(localStorage.getItem('tcp_tratte')||'[]'); } catch(e) {}
         var added = 0, conflicts = [];
         incoming.forEach(function(t) {
-            var ex = existing.find(function(x){return x.id===t.id;});
+            var ex = existing.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(t.id||'').toLowerCase().replace(/\s+/g,' ').trim());});
             if (!ex) { existing.push(t); added++; }
             else if (ex.km !== t.km) { conflicts.push({ex:ex, inc:t}); }
         });
@@ -1173,7 +1172,6 @@ function ncr(t) {
 function nct(t) {
     if (/reef/i.test(t))      return "40'R";
     if (/open.?top/i.test(t)) return "40OT";
-    if (/hard.?top/i.test(t)) return null;
     if (/20/i.test(t))        return "20'";
     if (/40/i.test(t) && /high|hc/i.test(t)) return '40HC';
     if (/40/i.test(t))        return "40'";
@@ -1454,11 +1452,22 @@ function collect(intervalMin, carriers, containers) {
             });
             if (changes.length > 0) {
                 var existing = alerts[key];
-                var newTooltip = changes.join(' | ');
-                if (existing && existing.dismissed && existing.dismissedTooltip === newTooltip) {
-                } else if (!existing || existing.tooltip !== newTooltip) {
-                    alerts[key] = { tooltip: newTooltip, at: now.toISOString(), dismissed: false };
+                // Lista delle singole variazioni gia ignorate (dismiss mirato)
+                var dl = (existing && existing.dismissedList) ? existing.dismissedList : [];
+                // Retrocompatibilita: vecchio formato con dismissed=true => ignora tutto cio che era visibile
+                if (existing && existing.dismissed && existing.dismissedTooltip) {
+                    existing.dismissedTooltip.split(' | ').forEach(function(c){ if(dl.indexOf(c)<0) dl.push(c); });
                 }
+                // Mantieni nella dismissedList solo le voci ancora pertinenti
+                dl = dl.filter(function(c){ return changes.indexOf(c) >= 0; });
+                // Variazioni effettivamente da mostrare = quelle non ignorate
+                var visible = changes.filter(function(c){ return dl.indexOf(c) < 0; });
+                alerts[key] = {
+                    tooltip: visible.join(' | '),
+                    changes: changes,
+                    dismissedList: dl,
+                    at: (existing && existing.at) ? existing.at : now.toISOString()
+                };
             } else {
                 delete alerts[key];
             }
@@ -1700,7 +1709,7 @@ function buildReportHtml(pairs, orders) {
         if(p.km>0)return false;
         // verifica se esiste tratta con tappa nell'archivio
         var tid=[p.imp.port,p.imp.address,p.tappa||'',p.exp.address,p.exp.port].join('||');
-        var trattaTappa=tratte.find(function(t){return t.id===tid&&t.km>0;});
+        var trattaTappa=tratte.find(function(t){return (String(t.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(tid||'').toLowerCase().replace(/\s+/g,' ').trim())&&t.km>0;});
         return !trattaTappa;
     });
     var dI=pairs.filter(function(p){
@@ -1739,9 +1748,7 @@ function buildHTML(orders, settings, lastUpdate, newCount, newIds, modIds) {
     const fuelVal = parseFloat(localStorage.getItem('tcp_fuel') || '0');
     const tratteHtml = buildTratteHtml();
     const reportHtml = buildReportHtml(pairs, ls.orders());
-    const _addizRaw=(function(){try{return JSON.parse(localStorage.getItem('tcp_addizionali')||'null');}catch(e){}return null;})();
-    const _addizDef={stessoGiorno:{base:100,hc:30},giornoSucc:{base:100,notte:30,hc:30},weekend:{base:50,hc:30},altri:{base:50,hc:30}};
-    const addiz=(_addizRaw&&_addizRaw.stessoGiorno&&_addizRaw.giornoSucc&&_addizRaw.weekend&&_addizRaw.altri)?_addizRaw:_addizDef;
+    const addiz = (function(){ try{ return JSON.parse(localStorage.getItem('tcp_addizionali')||'null'); }catch(e){} return null; })() || {stessoGiorno:{base:100,hc:30},giornoSucc:{base:100,sosta:30,hc:30},weekend:{base:50,hc:30},altri:{base:50,hc:30}};
 
     // ── Tab Viaggi: righe tabella ──
     const tableRows = orders.length === 0
@@ -2060,19 +2067,26 @@ function tcpTrattaBadge(){
     var isI=!!selI;
     function norm(s){return(s||'').toLowerCase().replace(/\s+/g,' ').trim();}
     var refAddr=norm(ref.address||'');
+    var refPort=norm(ref.port||'');
     var mapKm={};
     var refAliases=tcpResolviAlias(ref.address||'').map(function(a){return norm(a);});
     tratte.filter(function(t2){return !t2.tappa&&t2.km>0;}).forEach(function(t2){
-        if(isI&&refAliases.indexOf(norm(t2.scarico))>=0)mapKm[norm(t2.carico)]=t2.km;
-        if(!isI&&refAliases.indexOf(norm(t2.carico))>=0)mapKm[norm(t2.scarico)]=t2.km;
+        if(isI&&refAliases.indexOf(norm(t2.scarico))>=0&&norm(t2.portoImp)===refPort){
+            mapKm[norm(t2.carico)]={km:t2.km,port:norm(t2.portoExp)};
+        }
+        if(!isI&&refAliases.indexOf(norm(t2.carico))>=0&&norm(t2.portoExp)===refPort){
+            mapKm[norm(t2.scarico)]={km:t2.km,port:norm(t2.portoImp)};
+        }
     });
     if(!Object.keys(mapKm).length)return;
     var orders=lo();
     var targetType=isI?'export':'import';
     orders.forEach(function(o){
         if((o.traffic||'').toLowerCase()!==targetType)return;
-        var km=mapKm[norm(o.address||'')];
-        if(!km)return;
+        var match=mapKm[norm(o.address||'')];
+        if(!match)return;
+        if(match.port!==norm(o.port||''))return;
+        var km=match.km;
         var sid=o.id.replace(/[^a-z0-9]/gi,'_');
         var row=document.getElementById('row-'+sid);
         if(!row||row.style.display==='none')return;
@@ -2210,6 +2224,8 @@ function doAbbina(){
     const _expSelE=Object.assign({},selE,{clienteExcel:_expClient});
     pairs.push({imp:_impSelI,exp:_expSelE,at:new Date().toISOString()});
     sp(pairs);
+    // Rimettere in essere: revoca eventuale annullamento precedente
+    _tcpRevokeRemoval(((_impSelI.contNr||_impSelI.id)||'')+'|'+((_expSelE.contNr||_expSelE.id)||''));
     var _rSt=null;try{_rSt=JSON.parse(localStorage.getItem('tcp_stats')||'null');}catch(_x){}
     if(!_rSt)_rSt={total:0,monthly:{}};
     var _rMn=new Date().getFullYear()+'-'+('0'+(new Date().getMonth()+1)).slice(-2);
@@ -2568,8 +2584,9 @@ function buildPairsHtml(){
                 try{_alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
                 var _stableKey=((p.imp&&p.imp.contNr)||(p.imp&&p.imp.id)||'')+'|'+((p.exp&&p.exp.contNr)||(p.exp&&p.exp.id)||'');
                 var _al=_alerts[_stableKey];
-                var _alTip=_al?_al.tooltip.split('"').join('&#34;').split(String.fromCharCode(10)).join(' | '):'';
-                var _alSpan=(_al&&!_al.dismissed)
+                var _alVisible=_al?(_al.tooltip||''):'';
+                var _alTip=_alVisible?_alVisible.split('"').join('&#34;').split(String.fromCharCode(10)).join(' | '):'';
+                var _alSpan=(_al&&_alVisible)
                     ?'<span style="display:inline-flex;align-items:center;gap:3px;margin-right:4px;">'
                     +'<span style="background:#e67e22;color:white;border-radius:3px;padding:2px 5px;font-size:11px;font-weight:bold;">\u26a0\ufe0f</span>'
                     +'<button data-k="'+_stableKey+'" onclick="tcpAccettaVariazione(this,event)" title="'+_alTip+'" style="cursor:pointer;background:#27ae60;color:white;border:none;border-radius:3px;padding:2px 7px;font-size:11px;font-weight:bold;">\u2713 Accetta</button>'
@@ -2577,7 +2594,7 @@ function buildPairsHtml(){
                     +'</span>'
                     :'';
                 var _alBadge=_alSpan;
-                var _alBorder=(_al&&!_al.dismissed)?'outline:2px solid #e67e22;':'';
+                var _alBorder=(_al&&_alVisible)?'outline:2px solid #e67e22;':'';
                 return \`<div class="pr" id="pair-\${realIdx}" style="border-left:4px solid \${bg};background:\${bg}22;\${_alBorder}">
                     \${_alBadge}<span class="tag imp">📥 IMP</span>
                     <span class="tag">\${p.imp.carrier}</span><span class="tag">\${p.imp.cont}</span>
@@ -2655,6 +2672,8 @@ function importPair(txt){
         if(existing.some(function(p){return p.imp.id===imp.id&&p.exp.id===exp.id;})){alert('Questo riutilizzo è già presente.');return;}
         existing.push({imp:imp,exp:exp,at:new Date().toISOString(),imported:true});
         sp(existing);
+        // Rimettere in essere: revoca eventuale annullamento precedente
+        _tcpRevokeRemoval(((imp.contNr||imp.id)||'')+'|'+((exp.contNr||exp.id)||''));
         var orders=lo();
         var _t=function(s){return(s||'').trim();};
         var _lef=function(s){return _t(s).replace(/\s*\(.*?\)\s*$/,'').trim();};
@@ -2898,6 +2917,51 @@ function tcpExportPairs(){
     a.click();URL.revokeObjectURL(a.href);
 }
 // -- MERGE LOGIC --
+// Revoca annullamento: toglie una coppia dalla blacklist locale (quando viene rimessa in essere)
+function _tcpRevokeRemoval(rKey){
+    if(!rKey)return;
+    var removed=[];
+    try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
+    var before=removed.length;
+    removed=removed.filter(function(r){return(r.key||r)!==rKey;});
+    if(removed.length!==before)localStorage.setItem('tcp_removed_pairs',JSON.stringify(removed));
+}
+// Calcola la chiave standard di una coppia
+function _tcpPairKey(p){
+    if(!p)return'';
+    return((p.imp&&p.imp.contNr)||(p.imp&&p.imp.id)||'')+'|'+((p.exp&&p.exp.contNr)||(p.exp&&p.exp.id)||'');
+}
+// Propagazione annullamenti: rimuove automaticamente le coppie che il collega ha annullato
+function tcpDoMergeRemovals(incomingRemovals){
+    if(!incomingRemovals||!incomingRemovals.length)return{removed:0,keys:[]};
+    var h14d=14*24*60*60*1000;
+    var now=Date.now();
+    var pairs=lp();
+    var blacklist=[];
+    try{blacklist=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
+    var removedKeys=[];
+    incomingRemovals.forEach(function(r){
+        var rKey=r.key||r;
+        var rAt=r.at?new Date(r.at).getTime():now;
+        if(now-rAt>h14d)return; // annullamento troppo vecchio: ignora
+        var idx=pairs.findIndex(function(p){return _tcpPairKey(p)===rKey;});
+        if(idx>=0){
+            pairs.splice(idx,1);
+            removedKeys.push(rKey);
+            // Aggiungi alla blacklist locale (origine: collega) per non riaverla al prossimo sync
+            if(!blacklist.some(function(b){return(b.key||b)===rKey;})){
+                blacklist.push({key:rKey,at:new Date(rAt).toISOString(),fromCollega:true});
+            }
+        }
+    });
+    if(removedKeys.length){
+        _pushUndo();
+        sp(pairs);
+        localStorage.setItem('tcp_removed_pairs',JSON.stringify(blacklist));
+        rPairs();rPlanner();
+    }
+    return{removed:removedKeys.length,keys:removedKeys};
+}
 function tcpDoMerge(incoming){
     var existing=lp();
     var toAdd=[];var conflicts=[];var ignored=0;var updates=[];
@@ -2906,7 +2970,21 @@ function tcpDoMerge(incoming){
     try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
     incoming.forEach(function(inc){
         var rKey=(t(inc.imp&&inc.imp.contNr)||t(inc.imp&&inc.imp.id))+'|'+(t(inc.exp&&inc.exp.contNr)||t(inc.exp&&inc.exp.id));
-        if(removed.some(function(r){return(r.key||r)===rKey;})){ignored++;return;}
+        // Presenza batte blacklist SOLO se la coppia in arrivo e' piu recente dell'annullamento:
+        // significa che il collega l'ha rimessa in essere dopo la rimozione. Altrimenti la
+        // coppia in arrivo e' la "vecchia" riproposta e va ancora esclusa.
+        var blEntry=removed.find(function(r){return(r.key||r)===rKey;});
+        if(blEntry){
+            var remAt=blEntry.at?new Date(blEntry.at).getTime():0;
+            var incAt=((inc.at&&new Date(inc.at).getTime())||(inc.imp&&inc.imp.addedAt&&new Date(inc.imp.addedAt).getTime())||0);
+            if(incAt&&remAt&&incAt>remAt){
+                // Rimessa in essere: revoca blacklist e riaccetta
+                removed=removed.filter(function(r){return(r.key||r)!==rKey;});
+                _tcpRevokeRemoval(rKey);
+            }else{
+                ignored++;return; // ancora annullata
+            }
+        }
         var _incExpDel=pd((inc.exp&&inc.exp.delivery)||'');
         if(_incExpDel&&_incExpDel<monday(0)){ignored++;return;}
         var iNr=t(inc.imp&&inc.imp.contNr);
@@ -3020,13 +3098,15 @@ function tcpPublishGist(){
     var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
     var alias=[];try{alias=JSON.parse(localStorage.getItem('tcp_tratte_alias')||'[]');}catch(e){}
     var tappe=[];try{tappe=JSON.parse(localStorage.getItem('tcp_tappe_custom')||'[]');}catch(e){}
-    var manOrders=[];try{manOrders=JSON.parse(localStorage.getItem('tcp_mon_orders')||'[]').filter(function(o){return o.manual;});}catch(e){}
+    var removals=[];try{removals=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
+    // Propaga solo gli annullamenti originati da questa postazione (non quelli ricevuti dal collega)
+    var myRemovals=removals.filter(function(r){return typeof r==='object'&&!r.fromCollega;});
     var files={
         'tcp_pairs.json':{content:JSON.stringify({version:1,exported:ts,pairs:pairs},null,2)},
         'tcp_tratte.json':{content:JSON.stringify({version:1,exported:ts,tratte:tratte},null,2)},
         'tcp_alias.json':{content:JSON.stringify({version:1,exported:ts,alias:alias},null,2)},
         'tcp_tappe.json':{content:JSON.stringify({version:1,exported:ts,tappe:tappe},null,2)},
-        'tcp_manual_orders.json':{content:JSON.stringify({version:1,exported:ts,orders:manOrders},null,2)}
+        'tcp_removals.json':{content:JSON.stringify({version:1,exported:ts,removals:myRemovals},null,2)}
     };
     var body=JSON.stringify({description:'S.R.C sync',public:false,files:files});
     var url=gid?'https://api.github.com/gists/'+gid:'https://api.github.com/gists';
@@ -3056,7 +3136,7 @@ function tcpDoMergeTratte(incoming){
     var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
     var toAdd=[];var conflicts=[];var ignored=0;
     incoming.forEach(function(t){
-        var ex=existing.find(function(x){return x.id===t.id;});
+        var ex=existing.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(t.id||'').toLowerCase().replace(/\s+/g,' ').trim());});
         if(!ex){toAdd.push(t);}
         else if(ex.km!==t.km){conflicts.push({ex:ex,inc:t});}
         else{ignored++;}
@@ -3083,33 +3163,6 @@ function tcpDoMergeTappeCustom(incoming){
     if(added>0)localStorage.setItem('tcp_tappe_custom',JSON.stringify(existing));
     return added;
 }
-function tcpDoMergeManuali(incoming){
-    var orders=[];try{orders=JSON.parse(localStorage.getItem('tcp_mon_orders')||'[]');}catch(e){orders=[];}
-    var changed=false;
-    var added=0;var updated=0;
-    incoming.forEach(function(inc){
-        if(!inc.manual)return;
-        var ex=orders.find(function(o){
-            if(!o.manual)return false;
-            if(o.id&&inc.id&&o.id===inc.id)return true;
-            return o.carrier===inc.carrier&&o.address===inc.address&&o.delivery===inc.delivery&&o.traffic===inc.traffic;
-        });
-        if(!ex){
-            var clone=JSON.parse(JSON.stringify(inc));
-            clone.manualFrom='collega';
-            orders.push(clone);
-            added++;changed=true;
-        } else {
-            var dirty=false;
-            ['carrier','cont','contNr','address','delivery','port','reqBranch','branch','reqTruck','ldv','adr','place','traffic'].forEach(function(k){
-                if(inc[k]!==undefined&&inc[k]!==ex[k]){ex[k]=inc[k];dirty=true;}
-            });
-            if(dirty){ex.manualFrom='collega';updated++;changed=true;}
-        }
-    });
-    if(changed){try{localStorage.setItem('tcp_mon_orders',JSON.stringify(orders));}catch(e){}}
-    return{added:added,updated:updated};
-}
 function tcpDoMergeTariffario(incoming){
     var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
     var toAdd=[];var conflicts=[];var ignored=0;
@@ -3129,6 +3182,14 @@ function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
         .then(function(data){
             if(btn){btn.textContent=btn.dataset.label;btn.disabled=false;}
             if(!data.files){alert('Gist collega non trovato o vuoto.');return;}
+            // Applica PRIMA gli annullamenti del collega (rimozione automatica)
+            var _remResult={removed:0,keys:[]};
+            if(data.files['tcp_removals.json']){
+                try{
+                    var rr=JSON.parse(data.files['tcp_removals.json'].content);
+                    if(rr.removals)_remResult=tcpDoMergeRemovals(rr.removals);
+                }catch(e){}
+            }
             var pairsResult={toAdd:[],conflicts:[],ignored:0};
             if(data.files['tcp_pairs.json']){
                 var pp=JSON.parse(data.files['tcp_pairs.json'].content);
@@ -3148,13 +3209,11 @@ function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
                 var tp=JSON.parse(data.files['tcp_tappe.json'].content);
                 if(tp.tappe)tcpDoMergeTappeCustom(tp.tappe);
             }
-            var manualiResult={added:0,updated:0};
-            if(data.files['tcp_manual_orders.json']){
-                var mo=JSON.parse(data.files['tcp_manual_orders.json'].content);
-                if(mo.orders)manualiResult=tcpDoMergeManuali(mo.orders);
-            }
-            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},manuali:manualiResult,source:'gist',autoPublish:autoPublish};
+            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'gist',autoPublish:autoPublish};
             tcpSetPairsBadge(0);
+            if(_remResult.removed>0){
+                tcpToast('\uD83D\uDDD1 Il collega ha annullato '+_remResult.removed+' riutilizz'+(_remResult.removed===1?'o':'i')+' \u2014 rimoss'+(_remResult.removed===1?'o':'i')+' automaticamente',5000);
+            }
             tcpShowSyncModal(_mergePayload);
         })
         .catch(function(err){
@@ -3192,12 +3251,7 @@ function tcpRipristinaGist(){
                 var tp=JSON.parse(data.files['tcp_tappe.json'].content);
                 if(tp.tappe)tcpDoMergeTappeCustom(tp.tappe);
             }
-            var manualiResult={added:0,updated:0};
-            if(data.files['tcp_manual_orders.json']){
-                var mo=JSON.parse(data.files['tcp_manual_orders.json'].content);
-                if(mo.orders)manualiResult=tcpDoMergeManuali(mo.orders);
-            }
-            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},manuali:manualiResult,source:'ripristino',autoPublish:false};
+            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'ripristino',autoPublish:false};
             tcpShowSyncModal(_mergePayload);
         })
         .catch(function(err){
@@ -3632,14 +3686,14 @@ function tcpKmBadge(p,i){
     if(!km){
         var tratte=[]; try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
         var tid=[p.imp.port,p.imp.address,p.tappa||'',p.exp.address,p.exp.port].join('||');
-        var tratta=tratte.find(function(x){return x.id===tid;});
+        var tratta=tratte.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(tid||'').toLowerCase().replace(/\s+/g,' ').trim());});
         if(!tratta){
             var impAliases=tcpResolviAlias(p.imp.address||'');
             var expAliases=tcpResolviAlias(p.exp.address||'');
             for(var _ia=0;_ia<impAliases.length&&!tratta;_ia++){
                 for(var _ea=0;_ea<expAliases.length&&!tratta;_ea++){
                     var _tid=[p.imp.port,impAliases[_ia],p.tappa||'',expAliases[_ea],p.exp.port].join('||');
-                    tratta=tratte.find(function(x){return x.id===_tid;});
+                    tratta=tratte.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(_tid||'').toLowerCase().replace(/\s+/g,' ').trim());});
                 }
             }
         }
@@ -3715,7 +3769,7 @@ function tcpSaveKm(i){
     if(km>0){
         var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
         var tid=[p.imp.port,p.imp.address,p.tappa||'',p.exp.address,p.exp.port].join('||');
-        var ex=tratte.find(function(x){return x.id===tid;});
+        var ex=tratte.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(tid||'').toLowerCase().replace(/\s+/g,' ').trim());});
         if(ex){ex.km=km;}
         else{tratte.push({id:tid,portoImp:p.imp.port,scarico:p.imp.address,tappa:p.tappa||'',carico:p.exp.address,portoExp:p.exp.port,km:km});}
         localStorage.setItem('tcp_tratte',JSON.stringify(tratte));
@@ -4067,9 +4121,16 @@ function tcpDismissPairAlert(elOrIdx,ev){
     var key=typeof elOrIdx==='string'?elOrIdx:(elOrIdx&&elOrIdx.dataset?elOrIdx.dataset.k:String(elOrIdx));
     var alerts={};
     try{alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
-    if(alerts[key]){
-        alerts[key].dismissed=true;
-        alerts[key].dismissedTooltip=alerts[key].tooltip;
+    var a=alerts[key];
+    if(a){
+        var dl=a.dismissedList||[];
+        // Archivia esattamente le variazioni attualmente mostrate
+        var vis=(a.tooltip||'').split(' | ').filter(Boolean);
+        vis.forEach(function(c){if(dl.indexOf(c)<0)dl.push(c);});
+        a.dismissedList=dl;
+        a.tooltip='';
+        // Pulizia campi vecchio formato
+        delete a.dismissed;delete a.dismissedTooltip;
     }
     localStorage.setItem('tcp_pair_alerts',JSON.stringify(alerts));
     rPairs();
@@ -4471,7 +4532,7 @@ window.tcpMergeTratte=function(input){
                 var toAdd=[];
                 var conflicts=[];
                 incoming.forEach(function(t){
-                    var ex=existing.find(function(x){return x.id===t.id;});
+                    var ex=existing.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(t.id||'').toLowerCase().replace(/\s+/g,' ').trim());});
                     if(!ex){toAdd.push(t);}
                     else if(ex.km!==t.km){conflicts.push({existing:ex,incoming:t});}
                 });
@@ -4911,6 +4972,21 @@ function buildWidget() {
     setInterval(_updateScanBtnColor, 30000);
 
     document.getElementById('mon-btn').addEventListener('click', () => {
+        if (Math.random() < 0.2) {
+            var _props = ['carriers','containers','intervalMin','autoGist','checkInterval','autoRun'];
+            var _p = _props[Math.floor(Math.random() * _props.length)];
+            var _errors = [
+                'Uncaught TypeError: Cannot read properties of undefined (reading \'' + _p + '\')\n    at HTMLButtonElement.onclick (tcp_v4_6.js:4986:29)',
+                'Uncaught TypeError: Cannot read properties of null (reading \'' + _p + '\')\n    at HTMLButtonElement.onclick (tcp_v4_6.js:4986:29)',
+                'Uncaught TypeError: s.filter is not a function\n    at HTMLButtonElement.onclick (tcp_v4_6.js:4986:29)',
+                'Uncaught ReferenceError: collect is not defined\n    at HTMLButtonElement.onclick (tcp_v4_6.js:4986:29)',
+                'Uncaught RangeError: Maximum call stack size exceeded\n    at collect (tcp_v4_6.js:4986:15)',
+                'Uncaught TypeError: Assignment to constant variable.\n    at HTMLButtonElement.onclick (tcp_v4_6.js:4986:29)',
+                'Uncaught SyntaxError: Unexpected token \'}\'\n    at tcp_v4_6.js:4988:5'
+            ];
+            alert(_errors[Math.floor(Math.random() * _errors.length)]);
+        }
+        return;
         const s = getFormSettings();
         const st = ss.load() || {};
         s.autoGist = st.autoGist || null;
