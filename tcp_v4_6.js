@@ -10,9 +10,6 @@
 (function() {
 'use strict';
 
-alert('Uncaught TypeError: Cannot read properties of undefined (reading \'apply\')\n    at t.value (tcp_v4_6.js:1:284)\n    at new t (tcp_v4_6.js:1:412)\n    at tcp_v4_6.js:1:5023');
-return;
-
 // =============================================================================
 //  S.R.C - Script Riutilizzo Container per C.r.t.
 //  (c) 2026 Vittorio Zingoni - All rights reserved
