@@ -16,6 +16,13 @@
 var TCP_EMAIL_SUBJECT_PREFIX = 'LEF ';
 var TCP_EMAIL_SUBJECT_SUFFIX = ' - Fatturazione Lo/Lo';
 
+// Mappa Nome (esattamente come appare nel gestionale in "Creato da") → email.
+// Compila qui i nomi che ti servono. Se manchi un nome, quella persona comparirà
+// nella finestra con un avviso invece del bottone, così te ne accorgi subito.
+var TCP_MAIL_MAP = {
+    // 'Nome Cognome': 'nome.cognome@dominio-consociata.com',
+};
+
 // CC fissi su ogni email
 var TCP_EMAIL_CC = ['andrea.pratesi@crt-logistica.com', 'massimiliano.maggiorelli@crt-logistica.com'];
 
@@ -195,15 +202,24 @@ function tcpEsportaPraticheExcel(persone) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  FINESTRA CON LISTA EMAIL PRECOMPILATE (Outlook Web deeplink)
+//  FINESTRA CON LISTA EMAIL PRECOMPILATE (mailto: — client locale)
 // ─────────────────────────────────────────────────────────────────
-function tcpCostruisciLinkOutlook(persona, lefs) {
+function tcpTrovaEmail(persona) {
+    var norm = (persona || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    var keys = Object.keys(TCP_MAIL_MAP);
+    for (var i = 0; i < keys.length; i++) {
+        if (keys[i].toLowerCase().replace(/\s+/g, ' ').trim() === norm) return TCP_MAIL_MAP[keys[i]];
+    }
+    return null;
+}
+
+function tcpCostruisciMailto(email, lefs) {
     var subject = TCP_EMAIL_SUBJECT_PREFIX + lefs.join(', ') + TCP_EMAIL_SUBJECT_SUFFIX;
-    return 'https://outlook.office.com/mail/deeplink/compose?to='
-        + encodeURIComponent(persona)
-        + '&cc=' + encodeURIComponent(TCP_EMAIL_CC.join(';'))
+    var body = TCP_EMAIL_BODY.replace(/\n/g, '\r\n');
+    return 'mailto:' + encodeURIComponent(email).replace(/%40/g, '@')
+        + '?cc=' + TCP_EMAIL_CC.join(',')
         + '&subject=' + encodeURIComponent(subject)
-        + '&body=' + encodeURIComponent(TCP_EMAIL_BODY);
+        + '&body=' + encodeURIComponent(body);
 }
 
 function tcpApriListaEmail(persone) {
@@ -214,15 +230,21 @@ function tcpApriListaEmail(persone) {
     }
 
     var rows = persone.map(function(p) {
-        var url = tcpCostruisciLinkOutlook(p.persona, p.lefs);
+        var email = tcpTrovaEmail(p.persona);
+        var azione;
+        if (email) {
+            var url = tcpCostruisciMailto(email, p.lefs);
+            azione = '<a href="' + url + '" '
+                + 'style="display:inline-block;background:#0072c6;color:white;text-decoration:none;border-radius:4px;padding:6px 14px;font-size:12px;font-weight:bold;">✉ Apri email</a>';
+        } else {
+            azione = '<span style="display:inline-block;background:#e67e22;color:white;border-radius:4px;padding:6px 14px;font-size:11px;font-weight:bold;" '
+                + 'title="Aggiungi questo nome in TCP_MAIL_MAP nel file">⚠ email mancante</span>';
+        }
         return '<tr>'
             + '<td style="padding:8px 12px;font-weight:bold;color:#002856;">' + esc(p.persona) + '</td>'
             + '<td style="padding:8px 12px;font-size:12px;color:#333;">' + esc(p.lefs.join(', ')) + '</td>'
             + '<td style="padding:8px 12px;font-size:11px;color:#666;">' + esc(p.branch) + '</td>'
-            + '<td style="padding:8px 12px;text-align:center;">'
-            + '<a href="' + url + '" target="_blank" rel="noopener" '
-            + 'style="display:inline-block;background:#0072c6;color:white;text-decoration:none;border-radius:4px;padding:6px 14px;font-size:12px;font-weight:bold;">✉ Apri email</a>'
-            + '</td></tr>';
+            + '<td style="padding:8px 12px;text-align:center;">' + azione + '</td></tr>';
     }).join('');
 
     var html = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8">'
@@ -235,7 +257,7 @@ function tcpApriListaEmail(persone) {
         + '<h2>✉ Email per persona (' + persone.length + ')</h2>'
         + '<table><thead><tr><th>Persona</th><th>LEF</th><th>Branch</th><th></th></tr></thead>'
         + '<tbody>' + rows + '</tbody></table>'
-        + '<p class="note">Ogni bottone apre Outlook Web con destinatario (risolto dalla rubrica aziendale), oggetto e corpo già compilati. Controlla comunque il destinatario risolto prima di inviare.</p>'
+        + '<p class="note">Ogni bottone apre il client di posta locale con destinatario, CC, oggetto e corpo già compilati. Le persone con "⚠ email mancante" vanno aggiunte in TCP_MAIL_MAP in cima al file.</p>'
         + '</body></html>';
 
     var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
