@@ -21,6 +21,17 @@ var TCP_EMAIL_SUBJECT_SUFFIX = ' - Fatturazione Lo/Lo';
 // nella finestra con un avviso invece del bottone, così te ne accorgi subito.
 var TCP_MAIL_MAP = {
     // 'Nome Cognome': 'nome.cognome@dominio-consociata.com',
+    // 'Alessandra Generale': 'alessandra.generale@savinodelbene.com',
+    // 'Alice Gerardi': 'alice.gerardi@savinodelbene.com',
+    // 'Consuelo Begliuomini': 'c.begliuomini@albatrans.com',
+    // 'Giovanni Macera': 'giovanni.macera@arimar.it',
+    // 'Serena Guidotti': 'serena.guidotti@savinodelbene.com',
+    // 'Nome Cognome': 'nome.cognome@dominio-consociata.com',
+    // 'Nome Cognome': 'nome.cognome@dominio-consociata.com',
+    // 'Nome Cognome': 'nome.cognome@dominio-consociata.com',
+    // 'Nome Cognome': 'nome.cognome@dominio-consociata.com',
+    // 'Nome Cognome': 'nome.cognome@dominio-consociata.com',
+    // 'Nome Cognome': 'nome.cognome@dominio-consociata.com',
 };
 
 // CC fissi su ogni email
