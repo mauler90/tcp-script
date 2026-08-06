@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      2.4
+// @version      2.6
 // @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
@@ -117,7 +117,6 @@ function normalizeCarrier(text) {
 function normalizeContainer(text) {
     if (/reef/i.test(text))      return "40'R";
     if (/open.?top/i.test(text)) return "40OT";
-    if (/hard.?top/i.test(text)) return null;
     if (/20/i.test(text))        return "20'";
     if (/40/i.test(text) && /high|hc/i.test(text)) return "40HC";
     if (/40/i.test(text))        return "40'";
@@ -770,7 +769,7 @@ function tcpMergeTratteGest(input) {
         var existing = []; try { existing = JSON.parse(localStorage.getItem('tcp_tratte')||'[]'); } catch(e) {}
         var added = 0, conflicts = [];
         incoming.forEach(function(t) {
-            var ex = existing.find(function(x){return x.id===t.id;});
+            var ex = existing.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(t.id||'').toLowerCase().replace(/\s+/g,' ').trim());});
             if (!ex) { existing.push(t); added++; }
             else if (ex.km !== t.km) { conflicts.push({ex:ex, inc:t}); }
         });
@@ -1173,7 +1172,6 @@ function ncr(t) {
 function nct(t) {
     if (/reef/i.test(t))      return "40'R";
     if (/open.?top/i.test(t)) return "40OT";
-    if (/hard.?top/i.test(t)) return null;
     if (/20/i.test(t))        return "20'";
     if (/40/i.test(t) && /high|hc/i.test(t)) return '40HC';
     if (/40/i.test(t))        return "40'";
@@ -1275,7 +1273,10 @@ function portA(p) {
 }
 function pairedIds() {
     const s = new Set();
-    ls.pairs().forEach(p => { s.add(p.imp.id); s.add(p.exp.id); });
+    ls.pairs().forEach(p => {
+        s.add((p.imp.id||'').replace(/[^a-z0-9]/gi,'_')+'_'+(p.imp.traffic||'').toLowerCase().charAt(0));
+        s.add((p.exp.id||'').replace(/[^a-z0-9]/gi,'_')+'_'+(p.exp.traffic||'').toLowerCase().charAt(0));
+    });
     return s;
 }
 function wkNum(d) {
@@ -1342,9 +1343,11 @@ function collect(intervalMin, carriers, containers) {
                 const _ldvN     = cr.querySelector('td:nth-child(12)')?.innerText.trim() || '';
                 const _carrierN = ncr(rawCarrier) || _exO.carrier;
                 const _contN    = nct(rawCont) || _exO.cont;
+                const _adrElN   = cr.querySelector('[id*="dangerousGoodsPanel"] > span');
+                const _adrN     = _adrElN ? 'ADR' : '';
                 if (_exO.delivery !== _dlvN || _exO.port !== _portN || _exO.ldv !== _ldvN ||
                     _exO.address !== address || _exO.carrier !== _carrierN || _exO.cont !== _contN ||
-                    _exO.branch !== branch) {
+                    _exO.branch !== branch || _exO.reqTruck !== reqTruck || _exO.adr !== _adrN) {
                     _exO.delivery   = _dlvN;
                     _exO.port       = _portN;
                     _exO.ldv        = _ldvN;
@@ -1352,6 +1355,8 @@ function collect(intervalMin, carriers, containers) {
                     _exO.carrier    = _carrierN;
                     _exO.cont       = _contN;
                     _exO.branch     = branch;
+                    _exO.reqTruck   = reqTruck;
+                    _exO.adr        = _adrN;
                     _exO.isModified = true;
                     _exO.modifiedAt = now.toISOString();
                 }
@@ -1454,11 +1459,22 @@ function collect(intervalMin, carriers, containers) {
             });
             if (changes.length > 0) {
                 var existing = alerts[key];
-                var newTooltip = changes.join(' | ');
-                if (existing && existing.dismissed && existing.dismissedTooltip === newTooltip) {
-                } else if (!existing || existing.tooltip !== newTooltip) {
-                    alerts[key] = { tooltip: newTooltip, at: now.toISOString(), dismissed: false };
+                // Lista delle singole variazioni gia ignorate (dismiss mirato)
+                var dl = (existing && existing.dismissedList) ? existing.dismissedList : [];
+                // Retrocompatibilita: vecchio formato con dismissed=true => ignora tutto cio che era visibile
+                if (existing && existing.dismissed && existing.dismissedTooltip) {
+                    existing.dismissedTooltip.split(' | ').forEach(function(c){ if(dl.indexOf(c)<0) dl.push(c); });
                 }
+                // Mantieni nella dismissedList solo le voci ancora pertinenti
+                dl = dl.filter(function(c){ return changes.indexOf(c) >= 0; });
+                // Variazioni effettivamente da mostrare = quelle non ignorate
+                var visible = changes.filter(function(c){ return dl.indexOf(c) < 0; });
+                alerts[key] = {
+                    tooltip: visible.join(' | '),
+                    changes: changes,
+                    dismissedList: dl,
+                    at: (existing && existing.at) ? existing.at : now.toISOString()
+                };
             } else {
                 delete alerts[key];
             }
@@ -1700,7 +1716,7 @@ function buildReportHtml(pairs, orders) {
         if(p.km>0)return false;
         // verifica se esiste tratta con tappa nell'archivio
         var tid=[p.imp.port,p.imp.address,p.tappa||'',p.exp.address,p.exp.port].join('||');
-        var trattaTappa=tratte.find(function(t){return t.id===tid&&t.km>0;});
+        var trattaTappa=tratte.find(function(t){return (String(t.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(tid||'').toLowerCase().replace(/\s+/g,' ').trim())&&t.km>0;});
         return !trattaTappa;
     });
     var dI=pairs.filter(function(p){
@@ -1739,16 +1755,14 @@ function buildHTML(orders, settings, lastUpdate, newCount, newIds, modIds) {
     const fuelVal = parseFloat(localStorage.getItem('tcp_fuel') || '0');
     const tratteHtml = buildTratteHtml();
     const reportHtml = buildReportHtml(pairs, ls.orders());
-    const _addizRaw=(function(){try{return JSON.parse(localStorage.getItem('tcp_addizionali')||'null');}catch(e){}return null;})();
-    const _addizDef={stessoGiorno:{base:100,hc:30},giornoSucc:{base:100,notte:30,hc:30},weekend:{base:50,hc:30},altri:{base:50,hc:30}};
-    const addiz=(_addizRaw&&_addizRaw.stessoGiorno&&_addizRaw.giornoSucc&&_addizRaw.weekend&&_addizRaw.altri)?_addizRaw:_addizDef;
+    const addiz = (function(){ try{ return JSON.parse(localStorage.getItem('tcp_addizionali')||'null'); }catch(e){} return null; })() || {stessoGiorno:{base:100,hc:30},giornoSucc:{base:100,sosta:30,hc:30},weekend:{base:50,hc:30},altri:{base:50,hc:30}};
 
     // ── Tab Viaggi: righe tabella ──
     const tableRows = orders.length === 0
         ? `<tr><td colspan="14" style="text-align:center;padding:30px;color:#aaa;font-size:13px;">Nessun viaggio registrato</td></tr>`
         : orders.map(o => {
-            const sid  = o.id.replace(/[^a-z0-9]/gi,'_');
-            const isPaired = pid.has(o.id);
+            const sid  = o.id.replace(/[^a-z0-9]/gi,'_')+'_'+(o.traffic||'').toLowerCase().charAt(0);
+            const isPaired = pid.has(sid);
             const isNew    = nset.has(o.id);
             const isMod    = !isNew && mset.has(o.id);
             let rowBg = '';
@@ -1792,9 +1806,9 @@ function buildHTML(orders, settings, lastUpdate, newCount, newIds, modIds) {
                         style="background:#1a65b8;color:white;border:none;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:11px;margin-right:2px;" title="Vai alla riga nel gestionale">→</button>
                     <button onclick="if(window.opener)window.opener.tcpSelectRow('${o.id}')"
                         style="background:#5a9ce0;color:white;border:none;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:11px;margin-right:2px;" title="Spunta checkbox nel gestionale">✓</button>
-                    <button class="hl-btn" onclick="doHL('${o.id}')"
+                    <button class="hl-btn" onclick="doHL('${o.id}','${o.traffic}')"
                         style="background:${hlBg};color:white;border:none;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:11px;margin-right:3px;">${o.highlighted?'★':'☆'}</button>
-                    <button onclick="doDel('${o.id}')"
+                    <button onclick="doDel('${o.id}','${o.traffic}')"
                         style="background:#c0392b;color:white;border:none;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:11px;">✕</button>
                 </td>
                 <td style="white-space:nowrap;color:#888;font-size:10px;">${o.created}</td>
@@ -1902,7 +1916,8 @@ function lo(){try{return JSON.parse(localStorage.getItem(OK))||[];}catch{return[
 function so(o){localStorage.setItem(OK,JSON.stringify(o));}
 function lp(){try{return JSON.parse(localStorage.getItem(PK))||[];}catch{return[];}}
 function sp(p){localStorage.setItem(PK,JSON.stringify(p));}
-function pids(){const s=new Set();lp().forEach(p=>{s.add(p.imp.id);s.add(p.exp.id);});return s;}
+function pids(){const s=new Set();lp().forEach(p=>{s.add(sidOf(p.imp.id,p.imp.traffic));s.add(sidOf(p.exp.id,p.exp.traffic));});return s;}
+function sidOf(id,traffic){return String(id||'').replace(/[^a-z0-9]/gi,'_')+'_'+String(traffic||'').toLowerCase().charAt(0);}
 
 function pdt(s){const m=s.match(/(\\d{2})\\/(\\d{2})\\/(\\d{2}),?\\s*(\\d{2}):(\\d{2})/);if(!m)return 0;return new Date(2000+parseInt(m[3]),parseInt(m[2])-1,parseInt(m[1]),parseInt(m[4]),parseInt(m[5])).getTime();}
 function pd(s){const m=s.match(/(\\d{2})\\/(\\d{2})\\/(\\d{2})/);if(!m)return null;const d=new Date(2000+parseInt(m[3]),parseInt(m[2])-1,parseInt(m[1]));d.setHours(0,0,0,0);return d;}
@@ -2008,21 +2023,21 @@ function unpinRow(row){
     row.dataset.pinned='false';
 }
 function handleCheck(id,traffic){
-    const o=lo().find(x=>x.id===id);if(!o)return;
-    const sid=id.replace(/[^a-z0-9]/gi,'_');
+    const o=lo().find(x=>x.id===id&&(x.traffic||'').toLowerCase()===(traffic||'').toLowerCase());if(!o)return;
+    const sid=sidOf(id,traffic);
     const chk=document.getElementById('chk-'+sid);
     const isChecked=chk?.checked;
     // Deseleziona eventuale selezione precedente dello stesso tipo
     if(traffic.toLowerCase()==='import'){
         if(selI&&selI.id!==id){
-            const p=document.getElementById('chk-'+selI.id.replace(/[^a-z0-9]/gi,'_'));if(p)p.checked=false;
-            unpinRow(document.getElementById('row-'+selI.id.replace(/[^a-z0-9]/gi,'_')));
+            const p=document.getElementById('chk-'+sidOf(selI.id,selI.traffic));if(p)p.checked=false;
+            unpinRow(document.getElementById('row-'+sidOf(selI.id,selI.traffic)));
         }
         selI=isChecked?o:null;
     }else{
         if(selE&&selE.id!==id){
-            const p=document.getElementById('chk-'+selE.id.replace(/[^a-z0-9]/gi,'_'));if(p)p.checked=false;
-            unpinRow(document.getElementById('row-'+selE.id.replace(/[^a-z0-9]/gi,'_')));
+            const p=document.getElementById('chk-'+sidOf(selE.id,selE.traffic));if(p)p.checked=false;
+            unpinRow(document.getElementById('row-'+sidOf(selE.id,selE.traffic)));
         }
         selE=isChecked?o:null;
     }
@@ -2060,20 +2075,27 @@ function tcpTrattaBadge(){
     var isI=!!selI;
     function norm(s){return(s||'').toLowerCase().replace(/\s+/g,' ').trim();}
     var refAddr=norm(ref.address||'');
+    var refPort=norm(ref.port||'');
     var mapKm={};
     var refAliases=tcpResolviAlias(ref.address||'').map(function(a){return norm(a);});
     tratte.filter(function(t2){return !t2.tappa&&t2.km>0;}).forEach(function(t2){
-        if(isI&&refAliases.indexOf(norm(t2.scarico))>=0)mapKm[norm(t2.carico)]=t2.km;
-        if(!isI&&refAliases.indexOf(norm(t2.carico))>=0)mapKm[norm(t2.scarico)]=t2.km;
+        if(isI&&refAliases.indexOf(norm(t2.scarico))>=0&&norm(t2.portoImp)===refPort){
+            mapKm[norm(t2.carico)]={km:t2.km,port:norm(t2.portoExp)};
+        }
+        if(!isI&&refAliases.indexOf(norm(t2.carico))>=0&&norm(t2.portoExp)===refPort){
+            mapKm[norm(t2.scarico)]={km:t2.km,port:norm(t2.portoImp)};
+        }
     });
     if(!Object.keys(mapKm).length)return;
     var orders=lo();
     var targetType=isI?'export':'import';
     orders.forEach(function(o){
         if((o.traffic||'').toLowerCase()!==targetType)return;
-        var km=mapKm[norm(o.address||'')];
-        if(!km)return;
-        var sid=o.id.replace(/[^a-z0-9]/gi,'_');
+        var match=mapKm[norm(o.address||'')];
+        if(!match)return;
+        if(match.port!==norm(o.port||''))return;
+        var km=match.km;
+        var sid=sidOf(o.id,o.traffic);
         var row=document.getElementById('row-'+sid);
         if(!row||row.style.display==='none')return;
         // Cerca cella address tramite querySelector sull'id della riga
@@ -2101,7 +2123,8 @@ function updDim(){
     const refDate=pd(ref.delivery)||0;
     rows.forEach(r=>{
         const id=r.dataset.id||'';
-        if(id===(selI?.id||'')||id===(selE?.id||'')){r.classList.remove('dim');r.style.display='';return;}
+        const rTraffic=(r.dataset.traffic||'').toLowerCase();
+        if((id===(selI?.id||'')&&rTraffic==='import')||(id===(selE?.id||'')&&rTraffic==='export')){r.classList.remove('dim');r.style.display='';return;}
         const t=r.dataset.traffic?.toLowerCase()||'';
         const carr=r.dataset.carrier||'';const co=r.dataset.cont||'';
         const del=pd(r.dataset.delivery||r.cells[6]?.innerText||'')||0;
@@ -2138,7 +2161,7 @@ function updAbbina(){
     const btn=document.getElementById('btn-abbina');if(!btn)return;
     const flt=document.getElementById('btn-abbina-float');
     const dsel=document.getElementById('btn-deselect-float');if(dsel){const onViaggi=document.getElementById('t-viaggi')?.classList.contains('on');dsel.style.display=(selI||selE)&&onViaggi?'block':'none';}
-    const editFlt=document.getElementById('btn-edit-float');if(editFlt){const onViaggi2=document.getElementById('t-viaggi')?.classList.contains('on');const selOne=selI||selE;editFlt.style.display=selOne&&onViaggi2?'block':'none';if(selOne)editFlt.onclick=()=>doEdit(selOne.id);}
+    const editFlt=document.getElementById('btn-edit-float');if(editFlt){const onViaggi2=document.getElementById('t-viaggi')?.classList.contains('on');const selOne=selI||selE;editFlt.style.display=selOne&&onViaggi2?'block':'none';if(selOne)editFlt.onclick=()=>doEdit(selOne.id,selOne.traffic);}
     if(selI&&selE&&selI.carrier===selE.carrier&&compat(selI.cont,selE.cont)){
         const di=pd(selI.delivery),de=pd(selE.delivery);
         if(di&&de&&de<di){
@@ -2210,6 +2233,8 @@ function doAbbina(){
     const _expSelE=Object.assign({},selE,{clienteExcel:_expClient});
     pairs.push({imp:_impSelI,exp:_expSelE,at:new Date().toISOString()});
     sp(pairs);
+    // Rimettere in essere: revoca eventuale annullamento precedente
+    _tcpRevokeRemoval(((_impSelI.contNr||_impSelI.id)||'')+'|'+((_expSelE.contNr||_expSelE.id)||''));
     var _rSt=null;try{_rSt=JSON.parse(localStorage.getItem('tcp_stats')||'null');}catch(_x){}
     if(!_rSt)_rSt={total:0,monthly:{}};
     var _rMn=new Date().getFullYear()+'-'+('0'+(new Date().getMonth()+1)).slice(-2);
@@ -2220,10 +2245,10 @@ function doAbbina(){
     var _rK=_rCar+'_'+_rCo;
     _rSt.monthly[_rMn][_rK]=(_rSt.monthly[_rMn][_rK]||0)+1;
     localStorage.setItem('tcp_stats',JSON.stringify(_rSt));
-    [selI.id,selE.id].forEach(id=>{
-        const r=document.getElementById('row-'+id.replace(/[^a-z0-9]/gi,'_'));
+    [[selI.id,selI.traffic],[selE.id,selE.traffic]].forEach(function(pr){
+        const r=document.getElementById('row-'+sidOf(pr[0],pr[1]));
         if(r){unpinRow(r);r.style.background='#d4f5d4';r.style.outline='';r.dataset.paired='true';}
-        const chk=document.getElementById('chk-'+id.replace(/[^a-z0-9]/gi,'_'));
+        const chk=document.getElementById('chk-'+sidOf(pr[0],pr[1]));
         if(chk){chk.checked=false;chk.disabled=true;}
     });
     document.querySelectorAll('#tbody tr[data-id]').forEach(r=>r.style.display='');
@@ -2238,8 +2263,8 @@ function doAbbina(){
 
 // ── DESELECT ──
 function doDeselect(){
-    if(selI){unpinRow(document.getElementById('row-'+selI.id.replace(/[^a-z0-9]/gi,'_')));const chk=document.getElementById('chk-'+selI.id.replace(/[^a-z0-9]/gi,'_'));if(chk)chk.checked=false;selI=null;}
-    if(selE){unpinRow(document.getElementById('row-'+selE.id.replace(/[^a-z0-9]/gi,'_')));const chk=document.getElementById('chk-'+selE.id.replace(/[^a-z0-9]/gi,'_'));if(chk)chk.checked=false;selE=null;}
+    if(selI){unpinRow(document.getElementById('row-'+sidOf(selI.id,selI.traffic)));const chk=document.getElementById('chk-'+sidOf(selI.id,selI.traffic));if(chk)chk.checked=false;selI=null;}
+    if(selE){unpinRow(document.getElementById('row-'+sidOf(selE.id,selE.traffic)));const chk=document.getElementById('chk-'+sidOf(selE.id,selE.traffic));if(chk)chk.checked=false;selE=null;}
     document.querySelectorAll('#tbody tr[data-id]').forEach(r=>r.style.display='');
     document.querySelectorAll('.tcp-tratta-badge').forEach(function(el){el.remove();});
     updDim();updAbbina();
@@ -2337,10 +2362,10 @@ function tcpRefresh(){
     const orders=lo();
     const pid=pids();
     orders.forEach(o=>{
-        const sid=o.id.replace(/[^a-z0-9]/gi,'_');
+        const sid=sidOf(o.id,o.traffic);
         const row=document.getElementById('row-'+sid);
         if(!row)return;
-        if(pid.has(o.id)&&row.dataset.paired!=='true'){
+        if(pid.has(sid)&&row.dataset.paired!=='true'){
             row.style.background='#d4f5d4';row.dataset.paired='true';
             const chk=document.getElementById('chk-'+sid);
             if(chk){chk.checked=false;chk.disabled=true;}
@@ -2362,19 +2387,20 @@ function doEditPairChoice(side){
     var p=lp()[_editPairIdx];if(!p)return;
     var o=side==='imp'?p.imp:p.exp;
     var orders=lo();
-    if(!orders.find(function(x){return x.id===o.id;}))orders.push(o);
+    if(!orders.find(function(x){return x.id===o.id&&(x.traffic||'').toLowerCase()===(o.traffic||'').toLowerCase();}))orders.push(o);
     so(orders);
-    doEdit(o.id);
+    doEdit(o.id,o.traffic);
 }
 function closePairChoice(){
     var m=document.getElementById('pair-choice-modal');if(m)m.style.display='none';
 }
 // ── MODIFICA VIAGGIO ──
 
-function doEdit(id){
-    const orders=lo();const o=orders.find(x=>x.id===id);if(!o)return;
+function doEdit(id,traffic){
+    const orders=lo();const o=orders.find(x=>x.id===id&&(!traffic||(x.traffic||'').toLowerCase()===traffic.toLowerCase()));if(!o)return;
     const m=document.getElementById('edit-modal');if(!m)return;
     document.getElementById('edit-id').value=id;
+    document.getElementById('edit-orig-traffic').value=o.traffic||'';
     document.getElementById('edit-traffic').value=o.traffic||'';
     document.getElementById('edit-carrier').value=o.carrier||'';
     document.getElementById('edit-cont').value=o.cont||'';
@@ -2387,7 +2413,8 @@ function doEdit(id){
 }
 function saveEdit(){
     const id=document.getElementById('edit-id').value;
-    const orders=lo();const o=orders.find(x=>x.id===id);if(!o)return;
+    const origTraffic=(document.getElementById('edit-orig-traffic').value||'').toLowerCase();
+    const orders=lo();const o=orders.find(x=>x.id===id&&(!origTraffic||(x.traffic||'').toLowerCase()===origTraffic));if(!o)return;
     o.traffic=document.getElementById('edit-traffic').value.trim()||o.traffic;
     o.carrier=document.getElementById('edit-carrier').value.trim()||o.carrier;
     o.cont=document.getElementById('edit-cont').value.trim()||o.cont;
@@ -2399,16 +2426,16 @@ function saveEdit(){
     const newContNr=document.getElementById('edit-contNr').value.trim();
     if(newContNr)o.contNr=newContNr.toUpperCase();
     so(orders);
-    // Aggiorna anche la coppia abbinata se esiste
+    // Aggiorna anche la coppia abbinata se esiste (solo il lato corrispondente: evita di sovrascrivere sia IMP che EXP quando condividono lo stesso Nr. Container)
     const pairs=lp();let pairsChanged=false;
     pairs.forEach(p=>{
-        if(p.imp.id===id){Object.assign(p.imp,{carrier:o.carrier,cont:o.cont,contNr:o.contNr,address:o.address,delivery:o.delivery,port:o.port,branch:o.branch});pairsChanged=true;}
-        if(p.exp.id===id){Object.assign(p.exp,{carrier:o.carrier,cont:o.cont,contNr:o.contNr,address:o.address,delivery:o.delivery,port:o.port,branch:o.branch});pairsChanged=true;}
+        if(origTraffic==='import'&&p.imp.id===id){Object.assign(p.imp,{carrier:o.carrier,cont:o.cont,contNr:o.contNr,address:o.address,delivery:o.delivery,port:o.port,branch:o.branch});pairsChanged=true;}
+        if(origTraffic==='export'&&p.exp.id===id){Object.assign(p.exp,{carrier:o.carrier,cont:o.cont,contNr:o.contNr,address:o.address,delivery:o.delivery,port:o.port,branch:o.branch});pairsChanged=true;}
     });
     if(pairsChanged){sp(pairs);rPairs();}
     closeEdit();
     // Aggiorna data-* sulla riga senza re-render completo
-    const sid=id.replace(/[^a-z0-9]/gi,'_');
+    const sid=sidOf(id,origTraffic||o.traffic);
     const row=document.getElementById('row-'+sid);
     if(row){
         row.dataset.carrier=o.carrier;row.dataset.cont=o.cont;
@@ -2473,8 +2500,8 @@ function saveAddManual(){
         const pid=pids();
         const nset=new Set();
         const o=orders[0];
-        const sid=o.id.replace(/[^a-z0-9]/gi,'_');
-        const isPaired=pid.has(o.id);
+        const sid=sidOf(o.id,o.traffic);
+        const isPaired=pid.has(sid);
         const manualBadge='<span style="background:#1a65b8;color:white;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:4px;vertical-align:middle;">manuale</span>';
         const hlBg='#002856';
         const newRow=document.createElement('tr');
@@ -2510,8 +2537,8 @@ function saveAddManual(){
         // Aggiungi handlers via JS (nessun problema di escaping)
         newRow.querySelector('[data-act="goto"]').addEventListener('click',function(){if(window.opener)window.opener.tcpGoToRow(o.id);});
         newRow.querySelector('[data-act="sel"]').addEventListener('click',function(){if(window.opener)window.opener.tcpSelectRow(o.id);});
-        newRow.querySelector('[data-act="hl"]').addEventListener('click',function(){doHL(o.id);});
-        newRow.querySelector('[data-act="del"]').addEventListener('click',function(){doDel(o.id);});
+        newRow.querySelector('[data-act="hl"]').addEventListener('click',function(){doHL(o.id,o.traffic);});
+        newRow.querySelector('[data-act="del"]').addEventListener('click',function(){doDel(o.id,o.traffic);});
         newRow.querySelector('input[type="checkbox"]').addEventListener('change',function(){handleCheck(o.id,o.traffic);});
 
         tbody.insertBefore(newRow,tbody.firstChild);
@@ -2524,19 +2551,19 @@ function saveAddManual(){
 function closeAddManual(){document.getElementById('add-modal').style.display='none';}
 
 // ── HIGHLIGHT / DELETE ordine ──
-function doHL(id){
-    const orders=lo();const o=orders.find(x=>x.id===id);if(!o)return;
+function doHL(id,traffic){
+    const orders=lo();const o=orders.find(x=>x.id===id&&(!traffic||(x.traffic||'').toLowerCase()===traffic.toLowerCase()));if(!o)return;
     o.highlighted=!o.highlighted;so(orders);
-    const row=document.getElementById('row-'+id.replace(/[^a-z0-9]/gi,'_'));
+    const row=document.getElementById('row-'+sidOf(id,traffic||o.traffic));
     if(row&&row.dataset.paired!=='true'){
         row.style.background=o.highlighted?'#fff3cd':'';
         const btn=row.querySelector('button.hl-btn');
         if(btn){btn.textContent=o.highlighted?'★':'☆';btn.style.background=o.highlighted?'#f0a500':'#002856';}
     }
 }
-function doDel(id){
-    so(lo().filter(x=>x.id!==id));
-    const r=document.getElementById('row-'+id.replace(/[^a-z0-9]/gi,'_'));
+function doDel(id,traffic){
+    so(lo().filter(x=>!(x.id===id&&(!traffic||(x.traffic||'').toLowerCase()===traffic.toLowerCase()))));
+    const r=document.getElementById('row-'+sidOf(id,traffic));
     if(r)r.remove();
 }
 function clearAll(){
@@ -2568,8 +2595,9 @@ function buildPairsHtml(){
                 try{_alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
                 var _stableKey=((p.imp&&p.imp.contNr)||(p.imp&&p.imp.id)||'')+'|'+((p.exp&&p.exp.contNr)||(p.exp&&p.exp.id)||'');
                 var _al=_alerts[_stableKey];
-                var _alTip=_al?_al.tooltip.split('"').join('&#34;').split(String.fromCharCode(10)).join(' | '):'';
-                var _alSpan=(_al&&!_al.dismissed)
+                var _alVisible=_al?(_al.tooltip||''):'';
+                var _alTip=_alVisible?_alVisible.split('"').join('&#34;').split(String.fromCharCode(10)).join(' | '):'';
+                var _alSpan=(_al&&_alVisible)
                     ?'<span style="display:inline-flex;align-items:center;gap:3px;margin-right:4px;">'
                     +'<span style="background:#e67e22;color:white;border-radius:3px;padding:2px 5px;font-size:11px;font-weight:bold;">\u26a0\ufe0f</span>'
                     +'<button data-k="'+_stableKey+'" onclick="tcpAccettaVariazione(this,event)" title="'+_alTip+'" style="cursor:pointer;background:#27ae60;color:white;border:none;border-radius:3px;padding:2px 7px;font-size:11px;font-weight:bold;">\u2713 Accetta</button>'
@@ -2577,7 +2605,7 @@ function buildPairsHtml(){
                     +'</span>'
                     :'';
                 var _alBadge=_alSpan;
-                var _alBorder=(_al&&!_al.dismissed)?'outline:2px solid #e67e22;':'';
+                var _alBorder=(_al&&_alVisible)?'outline:2px solid #e67e22;':'';
                 return \`<div class="pr" id="pair-\${realIdx}" style="border-left:4px solid \${bg};background:\${bg}22;\${_alBorder}">
                     \${_alBadge}<span class="tag imp">📥 IMP</span>
                     <span class="tag">\${p.imp.carrier}</span><span class="tag">\${p.imp.cont}</span>
@@ -2655,6 +2683,8 @@ function importPair(txt){
         if(existing.some(function(p){return p.imp.id===imp.id&&p.exp.id===exp.id;})){alert('Questo riutilizzo è già presente.');return;}
         existing.push({imp:imp,exp:exp,at:new Date().toISOString(),imported:true});
         sp(existing);
+        // Rimettere in essere: revoca eventuale annullamento precedente
+        _tcpRevokeRemoval(((imp.contNr||imp.id)||'')+'|'+((exp.contNr||exp.id)||''));
         var orders=lo();
         var _t=function(s){return(s||'').trim();};
         var _lef=function(s){return _t(s).replace(/\s*\(.*?\)\s*$/,'').trim();};
@@ -2898,6 +2928,51 @@ function tcpExportPairs(){
     a.click();URL.revokeObjectURL(a.href);
 }
 // -- MERGE LOGIC --
+// Revoca annullamento: toglie una coppia dalla blacklist locale (quando viene rimessa in essere)
+function _tcpRevokeRemoval(rKey){
+    if(!rKey)return;
+    var removed=[];
+    try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
+    var before=removed.length;
+    removed=removed.filter(function(r){return(r.key||r)!==rKey;});
+    if(removed.length!==before)localStorage.setItem('tcp_removed_pairs',JSON.stringify(removed));
+}
+// Calcola la chiave standard di una coppia
+function _tcpPairKey(p){
+    if(!p)return'';
+    return((p.imp&&p.imp.contNr)||(p.imp&&p.imp.id)||'')+'|'+((p.exp&&p.exp.contNr)||(p.exp&&p.exp.id)||'');
+}
+// Propagazione annullamenti: rimuove automaticamente le coppie che il collega ha annullato
+function tcpDoMergeRemovals(incomingRemovals){
+    if(!incomingRemovals||!incomingRemovals.length)return{removed:0,keys:[]};
+    var h14d=14*24*60*60*1000;
+    var now=Date.now();
+    var pairs=lp();
+    var blacklist=[];
+    try{blacklist=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
+    var removedKeys=[];
+    incomingRemovals.forEach(function(r){
+        var rKey=r.key||r;
+        var rAt=r.at?new Date(r.at).getTime():now;
+        if(now-rAt>h14d)return; // annullamento troppo vecchio: ignora
+        var idx=pairs.findIndex(function(p){return _tcpPairKey(p)===rKey;});
+        if(idx>=0){
+            pairs.splice(idx,1);
+            removedKeys.push(rKey);
+            // Aggiungi alla blacklist locale (origine: collega) per non riaverla al prossimo sync
+            if(!blacklist.some(function(b){return(b.key||b)===rKey;})){
+                blacklist.push({key:rKey,at:new Date(rAt).toISOString(),fromCollega:true});
+            }
+        }
+    });
+    if(removedKeys.length){
+        _pushUndo();
+        sp(pairs);
+        localStorage.setItem('tcp_removed_pairs',JSON.stringify(blacklist));
+        rPairs();rPlanner();
+    }
+    return{removed:removedKeys.length,keys:removedKeys};
+}
 function tcpDoMerge(incoming){
     var existing=lp();
     var toAdd=[];var conflicts=[];var ignored=0;var updates=[];
@@ -2906,7 +2981,21 @@ function tcpDoMerge(incoming){
     try{removed=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
     incoming.forEach(function(inc){
         var rKey=(t(inc.imp&&inc.imp.contNr)||t(inc.imp&&inc.imp.id))+'|'+(t(inc.exp&&inc.exp.contNr)||t(inc.exp&&inc.exp.id));
-        if(removed.some(function(r){return(r.key||r)===rKey;})){ignored++;return;}
+        // Presenza batte blacklist SOLO se la coppia in arrivo e' piu recente dell'annullamento:
+        // significa che il collega l'ha rimessa in essere dopo la rimozione. Altrimenti la
+        // coppia in arrivo e' la "vecchia" riproposta e va ancora esclusa.
+        var blEntry=removed.find(function(r){return(r.key||r)===rKey;});
+        if(blEntry){
+            var remAt=blEntry.at?new Date(blEntry.at).getTime():0;
+            var incAt=((inc.at&&new Date(inc.at).getTime())||(inc.imp&&inc.imp.addedAt&&new Date(inc.imp.addedAt).getTime())||0);
+            if(incAt&&remAt&&incAt>remAt){
+                // Rimessa in essere: revoca blacklist e riaccetta
+                removed=removed.filter(function(r){return(r.key||r)!==rKey;});
+                _tcpRevokeRemoval(rKey);
+            }else{
+                ignored++;return; // ancora annullata
+            }
+        }
         var _incExpDel=pd((inc.exp&&inc.exp.delivery)||'');
         if(_incExpDel&&_incExpDel<monday(0)){ignored++;return;}
         var iNr=t(inc.imp&&inc.imp.contNr);
@@ -3020,13 +3109,15 @@ function tcpPublishGist(){
     var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
     var alias=[];try{alias=JSON.parse(localStorage.getItem('tcp_tratte_alias')||'[]');}catch(e){}
     var tappe=[];try{tappe=JSON.parse(localStorage.getItem('tcp_tappe_custom')||'[]');}catch(e){}
-    var manOrders=[];try{manOrders=JSON.parse(localStorage.getItem('tcp_mon_orders')||'[]').filter(function(o){return o.manual;});}catch(e){}
+    var removals=[];try{removals=JSON.parse(localStorage.getItem('tcp_removed_pairs')||'[]');}catch(e){}
+    // Propaga solo gli annullamenti originati da questa postazione (non quelli ricevuti dal collega)
+    var myRemovals=removals.filter(function(r){return typeof r==='object'&&!r.fromCollega;});
     var files={
         'tcp_pairs.json':{content:JSON.stringify({version:1,exported:ts,pairs:pairs},null,2)},
         'tcp_tratte.json':{content:JSON.stringify({version:1,exported:ts,tratte:tratte},null,2)},
         'tcp_alias.json':{content:JSON.stringify({version:1,exported:ts,alias:alias},null,2)},
         'tcp_tappe.json':{content:JSON.stringify({version:1,exported:ts,tappe:tappe},null,2)},
-        'tcp_manual_orders.json':{content:JSON.stringify({version:1,exported:ts,orders:manOrders},null,2)}
+        'tcp_removals.json':{content:JSON.stringify({version:1,exported:ts,removals:myRemovals},null,2)}
     };
     var body=JSON.stringify({description:'S.R.C sync',public:false,files:files});
     var url=gid?'https://api.github.com/gists/'+gid:'https://api.github.com/gists';
@@ -3054,11 +3145,16 @@ function tcpPublishGist(){
 // -- MERGE HELPERS --
 function tcpDoMergeTratte(incoming){
     var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
+    var resolvedT=[];try{resolvedT=JSON.parse(localStorage.getItem('tcp_resolved_tratte')||'[]');}catch(e){}
     var toAdd=[];var conflicts=[];var ignored=0;
     incoming.forEach(function(t){
-        var ex=existing.find(function(x){return x.id===t.id;});
+        var ex=existing.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(t.id||'').toLowerCase().replace(/\s+/g,' ').trim());});
         if(!ex){toAdd.push(t);}
-        else if(ex.km!==t.km){conflicts.push({ex:ex,inc:t});}
+        else if(ex.km!==t.km){
+            var rEntry=resolvedT.find(function(r){return r.id===ex.id&&r.mineKm===ex.km;});
+            if(rEntry&&rEntry.choice==='mine'){ignored++;}
+            else{conflicts.push({ex:ex,inc:t});}
+        }
         else{ignored++;}
     });
     return{toAdd:toAdd,conflicts:conflicts,ignored:ignored};
@@ -3083,33 +3179,6 @@ function tcpDoMergeTappeCustom(incoming){
     if(added>0)localStorage.setItem('tcp_tappe_custom',JSON.stringify(existing));
     return added;
 }
-function tcpDoMergeManuali(incoming){
-    var orders=[];try{orders=JSON.parse(localStorage.getItem('tcp_mon_orders')||'[]');}catch(e){orders=[];}
-    var changed=false;
-    var added=0;var updated=0;
-    incoming.forEach(function(inc){
-        if(!inc.manual)return;
-        var ex=orders.find(function(o){
-            if(!o.manual)return false;
-            if(o.id&&inc.id&&o.id===inc.id)return true;
-            return o.carrier===inc.carrier&&o.address===inc.address&&o.delivery===inc.delivery&&o.traffic===inc.traffic;
-        });
-        if(!ex){
-            var clone=JSON.parse(JSON.stringify(inc));
-            clone.manualFrom='collega';
-            orders.push(clone);
-            added++;changed=true;
-        } else {
-            var dirty=false;
-            ['carrier','cont','contNr','address','delivery','port','reqBranch','branch','reqTruck','ldv','adr','place','traffic'].forEach(function(k){
-                if(inc[k]!==undefined&&inc[k]!==ex[k]){ex[k]=inc[k];dirty=true;}
-            });
-            if(dirty){ex.manualFrom='collega';updated++;changed=true;}
-        }
-    });
-    if(changed){try{localStorage.setItem('tcp_mon_orders',JSON.stringify(orders));}catch(e){}}
-    return{added:added,updated:updated};
-}
 function tcpDoMergeTariffario(incoming){
     var existing=[];try{existing=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
     var toAdd=[];var conflicts=[];var ignored=0;
@@ -3129,6 +3198,14 @@ function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
         .then(function(data){
             if(btn){btn.textContent=btn.dataset.label;btn.disabled=false;}
             if(!data.files){alert('Gist collega non trovato o vuoto.');return;}
+            // Applica PRIMA gli annullamenti del collega (rimozione automatica)
+            var _remResult={removed:0,keys:[]};
+            if(data.files['tcp_removals.json']){
+                try{
+                    var rr=JSON.parse(data.files['tcp_removals.json'].content);
+                    if(rr.removals)_remResult=tcpDoMergeRemovals(rr.removals);
+                }catch(e){}
+            }
             var pairsResult={toAdd:[],conflicts:[],ignored:0};
             if(data.files['tcp_pairs.json']){
                 var pp=JSON.parse(data.files['tcp_pairs.json'].content);
@@ -3148,13 +3225,11 @@ function tcpFetchCollegaGist(tok,gidc,autoPublish,btnId){
                 var tp=JSON.parse(data.files['tcp_tappe.json'].content);
                 if(tp.tappe)tcpDoMergeTappeCustom(tp.tappe);
             }
-            var manualiResult={added:0,updated:0};
-            if(data.files['tcp_manual_orders.json']){
-                var mo=JSON.parse(data.files['tcp_manual_orders.json'].content);
-                if(mo.orders)manualiResult=tcpDoMergeManuali(mo.orders);
-            }
-            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},manuali:manualiResult,source:'gist',autoPublish:autoPublish};
+            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'gist',autoPublish:autoPublish};
             tcpSetPairsBadge(0);
+            if(_remResult.removed>0){
+                tcpToast('\uD83D\uDDD1 Il collega ha annullato '+_remResult.removed+' riutilizz'+(_remResult.removed===1?'o':'i')+' \u2014 rimoss'+(_remResult.removed===1?'o':'i')+' automaticamente',5000);
+            }
             tcpShowSyncModal(_mergePayload);
         })
         .catch(function(err){
@@ -3192,12 +3267,7 @@ function tcpRipristinaGist(){
                 var tp=JSON.parse(data.files['tcp_tappe.json'].content);
                 if(tp.tappe)tcpDoMergeTappeCustom(tp.tappe);
             }
-            var manualiResult={added:0,updated:0};
-            if(data.files['tcp_manual_orders.json']){
-                var mo=JSON.parse(data.files['tcp_manual_orders.json'].content);
-                if(mo.orders)manualiResult=tcpDoMergeManuali(mo.orders);
-            }
-            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},manuali:manualiResult,source:'ripristino',autoPublish:false};
+            _mergePayload={pairs:pairsResult,tratte:tratteResult,tariffario:{toAdd:[],conflicts:[],ignored:0},source:'ripristino',autoPublish:false};
             tcpShowSyncModal(_mergePayload);
         })
         .catch(function(err){
@@ -3333,12 +3403,23 @@ function tcpApplyMergePairsModal(){
     tcpRefresh();
     // Tratte
     var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
+    var resolvedT=[];try{resolvedT=JSON.parse(localStorage.getItem('tcp_resolved_tratte')||'[]');}catch(e){}
     (tD.toAdd||[]).forEach(function(t){tratte.push(t);});
     (tD.conflicts||[]).forEach(function(cf,ci){
         var sel=document.querySelector('input[name="mtc'+ci+'"]:checked');
-        if(sel&&sel.value==='theirs'){var ex=tratte.find(function(x){return x.id===cf.ex.id;});if(ex)ex.km=cf.inc.km;}
+        var choice=sel?sel.value:'mine';
+        if(choice==='theirs'){
+            var ex=tratte.find(function(x){return x.id===cf.ex.id;});
+            if(ex)ex.km=cf.inc.km;
+            resolvedT=resolvedT.filter(function(r){return r.id!==cf.ex.id;});
+        }else{
+            var rIdx=resolvedT.findIndex(function(r){return r.id===cf.ex.id;});
+            var rec={id:cf.ex.id,choice:'mine',mineKm:cf.ex.km,at:new Date().toISOString()};
+            if(rIdx>=0)resolvedT[rIdx]=rec;else resolvedT.push(rec);
+        }
     });
     localStorage.setItem('tcp_tratte',JSON.stringify(tratte));
+    localStorage.setItem('tcp_resolved_tratte',JSON.stringify(resolvedT));
     if(window.tcpRenderTratte)tcpRenderTratte();
     // Tariffario
     var tar=[];try{tar=JSON.parse(localStorage.getItem('tcp_tariffario')||'[]');}catch(e){}
@@ -3387,6 +3468,16 @@ function cleanExpired(){
             return !r.at||(Date.now()-new Date(r.at).getTime())<h10d;
         });
         localStorage.setItem('tcp_resolved_conflicts',JSON.stringify(resolved));
+    })();
+    // Pulizia resolved tratte (30gg)
+    (function(){
+        var resolvedT=[];
+        try{resolvedT=JSON.parse(localStorage.getItem('tcp_resolved_tratte')||'[]');}catch(e){}
+        var h30d=30*24*60*60*1000;
+        resolvedT=resolvedT.filter(function(r){
+            return !r.at||(Date.now()-new Date(r.at).getTime())<h30d;
+        });
+        localStorage.setItem('tcp_resolved_tratte',JSON.stringify(resolvedT));
     })();
     // Pulizia removed_pairs (14gg)
     (function(){
@@ -3632,14 +3723,14 @@ function tcpKmBadge(p,i){
     if(!km){
         var tratte=[]; try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
         var tid=[p.imp.port,p.imp.address,p.tappa||'',p.exp.address,p.exp.port].join('||');
-        var tratta=tratte.find(function(x){return x.id===tid;});
+        var tratta=tratte.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(tid||'').toLowerCase().replace(/\s+/g,' ').trim());});
         if(!tratta){
             var impAliases=tcpResolviAlias(p.imp.address||'');
             var expAliases=tcpResolviAlias(p.exp.address||'');
             for(var _ia=0;_ia<impAliases.length&&!tratta;_ia++){
                 for(var _ea=0;_ea<expAliases.length&&!tratta;_ea++){
                     var _tid=[p.imp.port,impAliases[_ia],p.tappa||'',expAliases[_ea],p.exp.port].join('||');
-                    tratta=tratte.find(function(x){return x.id===_tid;});
+                    tratta=tratte.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(_tid||'').toLowerCase().replace(/\s+/g,' ').trim());});
                 }
             }
         }
@@ -3715,7 +3806,7 @@ function tcpSaveKm(i){
     if(km>0){
         var tratte=[];try{tratte=JSON.parse(localStorage.getItem('tcp_tratte')||'[]');}catch(e){}
         var tid=[p.imp.port,p.imp.address,p.tappa||'',p.exp.address,p.exp.port].join('||');
-        var ex=tratte.find(function(x){return x.id===tid;});
+        var ex=tratte.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(tid||'').toLowerCase().replace(/\s+/g,' ').trim());});
         if(ex){ex.km=km;}
         else{tratte.push({id:tid,portoImp:p.imp.port,scarico:p.imp.address,tappa:p.tappa||'',carico:p.exp.address,portoExp:p.exp.port,km:km});}
         localStorage.setItem('tcp_tratte',JSON.stringify(tratte));
@@ -4067,9 +4158,16 @@ function tcpDismissPairAlert(elOrIdx,ev){
     var key=typeof elOrIdx==='string'?elOrIdx:(elOrIdx&&elOrIdx.dataset?elOrIdx.dataset.k:String(elOrIdx));
     var alerts={};
     try{alerts=JSON.parse(localStorage.getItem('tcp_pair_alerts')||'{}');}catch(e){}
-    if(alerts[key]){
-        alerts[key].dismissed=true;
-        alerts[key].dismissedTooltip=alerts[key].tooltip;
+    var a=alerts[key];
+    if(a){
+        var dl=a.dismissedList||[];
+        // Archivia esattamente le variazioni attualmente mostrate
+        var vis=(a.tooltip||'').split(' | ').filter(Boolean);
+        vis.forEach(function(c){if(dl.indexOf(c)<0)dl.push(c);});
+        a.dismissedList=dl;
+        a.tooltip='';
+        // Pulizia campi vecchio formato
+        delete a.dismissed;delete a.dismissedTooltip;
     }
     localStorage.setItem('tcp_pair_alerts',JSON.stringify(alerts));
     rPairs();
@@ -4471,7 +4569,7 @@ window.tcpMergeTratte=function(input){
                 var toAdd=[];
                 var conflicts=[];
                 incoming.forEach(function(t){
-                    var ex=existing.find(function(x){return x.id===t.id;});
+                    var ex=existing.find(function(x){return (String(x.id||'').toLowerCase().replace(/\s+/g,' ').trim()===String(t.id||'').toLowerCase().replace(/\s+/g,' ').trim());});
                     if(!ex){toAdd.push(t);}
                     else if(ex.km!==t.km){conflicts.push({existing:ex,incoming:t});}
                 });
@@ -4537,6 +4635,7 @@ window.tcpApplicaMerge=function(){
   <div style="background:white;border-radius:10px;padding:24px;min-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.3);">
     <h3 style="margin:0 0 16px;color:#002856;font-size:14px;">✏️ Modifica Viaggio</h3>
     <input type="hidden" id="edit-id">
+    <input type="hidden" id="edit-orig-traffic">
     <div style="display:grid;gap:8px;">
       <label style="font-size:11px;color:#555;">Traffico<br>
         <select id="edit-traffic" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
