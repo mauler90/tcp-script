@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         S.R.C - Script Riutilizzo Container
 // @namespace    http://tampermonkey.net/
-// @version      2.7
+// @version      2.8
 // @description  S.R.C - Script Riutilizzo Container per C.r.t. | (c) 2026 Vittorio Zingoni - All rights reserved
 // @match        *://*/*
 // @grant        none
@@ -68,8 +68,8 @@ function applyConditionalStyles() {
     });
 }
 
-const ORDER_MAIN      = [1, 7, 2, 10, 3, 4, 5, 6, 8, 9, 11, 12];
-const ORDER_CONTAINER = [3, 1, 6, 2, 11, 4, 5, 7, 8, 9, 10, 12, 13];
+const ORDER_MAIN      = [0, 1, 7, 2, 10, 3, 4, 5, 6, 8, 9, 11, 12];
+const ORDER_CONTAINER = [0, 3, 1, 6, 2, 11, 4, 5, 7, 8, 9, 10, 12, 13];
 
 function reorderRow(row, newOrder) {
     if (row.dataset.reordered) return;
